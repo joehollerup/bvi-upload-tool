@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# BVI — excluded data / output
+test-data/
+feedback/
+specs/
+gsc_extract/
+*.zip
+*.json
+*.png
+*.svg
+
+# Temp upload files
+/tmp/
+bvi_*/
+
+# Client data CSVs (keep parsers, not the actual client files)
+KEEN - *.csv
+Traffic_acquisition_*.csv
+
+# Built dashboard output
+keen_bvi_dashboard.html
+keen_bvi_output.json
+
+# macOS
+.DS_Store

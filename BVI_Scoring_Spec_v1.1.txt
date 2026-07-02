@@ -1,0 +1,498 @@
+═══════════════════════════════════════════════════════════════════
+BRAND VELOCITY INDEX (BVI) — SCORING SPECIFICATION v1.1
+Power Digital Marketing — Confidential
+Last updated: May 2026
+═══════════════════════════════════════════════════════════════════
+
+This document governs all BVI score calculations. Any deviation from
+this spec in code or tooling is a bug, not a feature. Changes to this
+spec require a version increment and internal sign-off.
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 1: CORE PRINCIPLES
+───────────────────────────────────────────────────────────────────
+
+1.1 RELATIVE SCORING — NON-NEGOTIABLE
+  All dimension scores are based on trend direction and rate of change,
+  never on absolute values. A brand with 10K branded impressions growing
+  15% MoM scores identically to a brand with 2M impressions growing 15% MoM.
+  This makes the BVI valid across all client sizes, verticals, and categories.
+  Absolute values are context. Momentum is health.
+
+1.2 DETERMINISTIC CALCULATION
+  BVI scores are calculated by code, not by AI interpretation.
+  The same data inputs must produce the same score every time,
+  regardless of which model version runs, what date it is, or
+  how many times the calculation is performed.
+  Claude API is called once per month for one purpose only: narrative generation.
+  Claude does not calculate, override, or influence any score.
+
+1.3 DATA HONESTY
+  Missing data is always excluded from scoring — never estimated,
+  filled with dummy values, or approximated. If a signal is missing,
+  the weighted average denominator adjusts to exclude it.
+  Every exclusion is flagged visibly in the output.
+
+1.4 SIGNAL COMPOSITION INTEGRITY
+  A BVI score is only comparable MoM when the same dimensions are active
+  in both months. If signal composition changes between months (a new data
+  source is added or removed), the MoM delta is marked non-comparable.
+  A brand's score should only move because the brand moved, not because
+  a new signal was added to the calculation.
+
+1.5 REALISTIC SCORE RANGE
+  A healthy, active brand in normal conditions should score 45–85.
+  Scores below 45 indicate meaningful negative signals across multiple dimensions.
+  Scores above 85 are rare and require strong positive signals across all dimensions.
+  A score of 50 is neutral — neither growing nor declining.
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 2: DIMENSIONS, WEIGHTS, AND DATA SOURCES
+───────────────────────────────────────────────────────────────────
+
+2.1 BRONZE TIER (base — always active if data available)
+
+  Dimension              Weight    Source
+  ─────────────────────────────────────────────────────────────────
+  Search Demand          22%       GSC (ZIP) + Google Trends Export 1
+  Digital Presence       22%       GA4 Traffic Acquisition CSV
+  Organic Social         14%       Instagram + TikTok (manual entry v1)
+  Competitive Position   14%       Google Trends Export 1
+  Category Context        8%       Google Trends Export 2
+  ─────────────────────────────────────────────────────────────────
+  Bronze subtotal        80%
+
+2.2 SILVER TIER (adds to Bronze — future build)
+
+  Social Listening       10%       Meltwater
+  Paid Brand Efficiency   5%       Google Ads + Meta Ads
+
+2.3 GOLD TIER (adds to Silver — future build)
+
+  Direct Awareness        5%       PDM Survey (Pollfish)
+
+2.4 WEIGHT NORMALIZATION
+  Weights listed above assume all dimensions in the tier are active.
+  If any dimension is missing data and excluded, remaining active
+  dimension weights are normalized proportionally so they still sum to 100%.
+
+  Example: Bronze tier, Organic Social missing.
+  Remaining weights: Search 22, Digital 22, Competitive 14, Category 8 = 66 total.
+  Normalized: Search = 22/66 = 33.3%, Digital = 33.3%, Competitive = 21.2%, Category = 12.1%
+  BVI = sum(score × normalized_weight) for active dimensions only.
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 3: SIGNAL SCORING SCALE
+───────────────────────────────────────────────────────────────────
+
+3.1 STANDARD MoM PERCENTAGE CHANGE SCALE
+  Used for: impressions, clicks, sessions, reach, views, follower growth rate.
+
+  MoM % Change          Score
+  ──────────────────────────────
+  +15% or more          92
+  +8% to +15%           80
+  +3% to +8%            68
+  0% to +3%             57
+  -3% to 0%             46
+  -8% to -3%            35
+  -15% to -8%           24
+  Worse than -15%       14
+
+  Interpolation: scores interpolate linearly within each band.
+  Example: +5% = 68 + ((5-3)/(8-3)) × (80-68) = 72.8 → 73
+
+3.2 PERCENTAGE POINT CHANGE SCALE
+  Used for: direct % of total sessions, engagement rate (which are
+  already expressed as percentages, so change is in percentage points).
+
+  MoM Change (pts)      Score
+  ──────────────────────────────
+  +2.0pts or more       92
+  +1.0 to +2.0pts       78
+  +0.3 to +1.0pts       64
+  -0.3 to +0.3pts       52
+  -1.0 to -0.3pts       40
+  -2.0 to -1.0pts       28
+  Worse than -2.0pts    16
+
+3.3 POSITION CHANGE SCALE (inverse — lower position number = better rank)
+
+  Position MoM Change   Score
+  ──────────────────────────────
+  Improved 1.0+         92
+  Improved 0.5 to 1.0   80
+  Improved 0.1 to 0.5   66
+  Flat (within 0.1)     54
+  Declined 0.1 to 0.5   42
+  Declined 0.5 to 1.0   30
+  Declined 1.0+         18
+
+3.4 FIRST MONTH BASELINE
+  The first month in any dataset has no prior month to compare against.
+  All MoM signals score 55 (neutral) for that month.
+  This month is labeled "Baseline" in the results — not used for trend analysis.
+  MoM delta is displayed as "—" for the baseline month.
+
+3.5 LARGE SWING CAP
+  Any single MoM signal change exceeding ±40% is capped at the ±40% score
+  value for that signal's contribution to the dimension score.
+  This prevents a one-off viral moment, a campaign spike, or a data anomaly
+  from producing an artificially extreme BVI.
+  The raw swing value is still displayed in the data — only the score
+  contribution is capped. A large swing flag is added to the narrative prompt.
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 4: DIMENSION SCORING RULES
+───────────────────────────────────────────────────────────────────
+
+4.1 SEARCH DEMAND (22%)
+
+  Data sources: GSC Chart.csv + Queries.csv + Google Trends Export 1
+
+  Signals and internal weights:
+    A. Branded impressions MoM %       35%   → Standard % change scale (3.1)
+    B. Branded clicks MoM %            25%   → Standard % change scale (3.1)
+    C. Google Trends index MoM %       25%   → Standard % change scale (3.1)
+    D. Average position MoM change     15%   → Position scale (3.3)
+
+  Branded metrics methodology:
+    Branded clicks = total Chart.csv clicks × branded_share
+    Branded share = branded_clicks_in_Queries.csv / total_clicks_in_Queries.csv
+    Branded share is calculated once from Queries.csv and applied to all months.
+    Queries.csv is an aggregated total — it has no monthly breakdown.
+    This is a known approximation. It is consistent month-to-month.
+
+  Google Trends handling for small brands (index < 10):
+    Score signal C on MoM change (standard % scale), not absolute value.
+    A brand with Trends index of 1 rising to 2 = +100% MoM = score 92.
+    A brand with Trends index of 1 staying at 1 = 0% MoM = score 57.
+
+  Rising tide modifier:
+    If Category Context dimension detects risingTide = TRUE for this month,
+    apply a 0.90 multiplier to signal C (Trends) score only.
+    Rationale: some Trends gains may reflect category momentum, not brand.
+    The multiplier is conservative — brand growth concurrent with category
+    growth is still positive, just discounted slightly.
+
+  Missing data handling:
+    GSC unavailable: signals A, B, D score 50 each. Flag: "GSC data missing."
+    Trends Export 1 unavailable: signal C scores 50. Flag: "Trends data missing."
+    Both unavailable: dimension excluded entirely from BVI.
+
+─────────────────────────────────────────────────────────────────
+
+4.2 DIGITAL PRESENCE (22%)
+
+  Data source: GA4 Traffic Acquisition CSV (monthly breakdown)
+
+  Signals and internal weights:
+    A. Direct sessions MoM %           30%   → Standard % change scale (3.1)
+    B. Direct % of total sessions MoM  40%   → Percentage point scale (3.2)
+    C. Organic Search sessions MoM %   30%   → Standard % change scale (3.1)
+
+  Signal B is weighted highest (40%) because it is size-agnostic.
+  A brand growing from 15% to 17% direct share signals stronger brand recall
+  than one growing from 100K to 110K direct sessions if total traffic also grew.
+
+  Total sessions denominator:
+    Use the Grand Total row from the GA4 export as denominator for direct %.
+    Do not sum named channels — the export contains 15+ channel types and
+    summing only known channels understates total and overstates direct %.
+
+  Missing data handling:
+    GA4 unavailable: dimension excluded entirely from BVI.
+    Flag: "Digital Presence excluded — GA4 data not uploaded."
+
+─────────────────────────────────────────────────────────────────
+
+4.3 ORGANIC SOCIAL (14%)
+
+  Data sources: Instagram (manual entry) + TikTok (manual entry) — v1
+  Future v2: CSV parsers for Meta Business Suite and TikTok Studio exports.
+
+  Signals and internal weights:
+    A. Engagement rate MoM change      45%   → Percentage point scale (3.2)
+    B. Follower growth rate MoM %      30%   → Standard % change scale (3.1)
+    C. Organic reach MoM %             25%   → Standard % change scale (3.1)
+
+  Signal A (engagement rate) is weighted highest because reach and follower
+  counts can be inflated by viral one-off content. Sustained engagement
+  reflects genuine audience health and cannot be easily gamed.
+
+  Manual entry fields (v1):
+    Instagram: organic reach, followers EOM, net follower growth, engagement rate %
+    TikTok: organic views, followers EOM, net follower growth, engagement rate %
+    SEMrush: combined monthly search volume for all category terms (thousands)
+
+  Combined scoring:
+    If both Instagram and TikTok data are entered, average the two platform
+    signals before scoring. If only one platform is available, score on that
+    platform alone with a "Single platform" flag.
+
+  Missing data handling:
+    No social data entered: dimension excluded entirely from BVI.
+    Flag: "Organic Social excluded — no social data entered."
+    Partial data (one platform only): score on available platform, flag shown.
+
+─────────────────────────────────────────────────────────────────
+
+4.4 COMPETITIVE POSITION (14%)
+
+  Data source: Google Trends Export 1 (brand vs competitors, same query)
+
+  NEVER score on absolute Trends index value.
+  Score on share, share change, and gap change — all relative metrics.
+
+  Signals and internal weights:
+    A. Brand Trends share MoM change   50%   → Percentage point scale (3.2)
+    B. Gap to nearest competitor MoM   30%   → Percentage point scale (3.2)
+    C. Brand Trends index MoM %        20%   → Standard % change scale (3.1)
+
+  Calculations:
+    Brand Trends share = brand_index / sum(all_brand_indices_in_query) × 100
+    Nearest competitor = competitor with highest Trends index (not the client)
+    Gap = client_index - nearest_competitor_index
+    Positive gap = client is ahead. Negative gap = client is behind.
+
+  Signal A scoring example:
+    Brand share was 18%, now 21% = +3pts → score 92 (strong improvement)
+    Brand share was 18%, now 17% = -1pt → score 40 (mild decline)
+
+  Signal B scoring:
+    Gap widening = good (client pulling ahead). Gap narrowing = watch.
+    Use percentage point scale (3.2) — same thresholds as direct % change.
+
+  Competitive rank:
+    Record ordinal rank (1st, 2nd, 3rd, 4th) by Trends index.
+    Displayed in UI as context only. Does NOT affect dimension score.
+    Rationale: a brand ranked #3 but improving rapidly is healthier than
+    a brand ranked #1 but declining — rank alone is misleading.
+
+  Missing data handling:
+    Trends Export 1 unavailable: dimension excluded entirely from BVI.
+    Flag: "Competitive Position excluded — Trends Export 1 not uploaded."
+
+─────────────────────────────────────────────────────────────────
+
+4.5 CATEGORY CONTEXT (8%)
+
+  Data source: Google Trends Export 2 (brand vs category terms, separate query)
+
+  This dimension measures whether the brand is growing faster than its category,
+  or riding a category-wide wave. It produces a score AND a rising tide flag
+  that modifies Search Demand scoring (see 4.1).
+
+  Signals and internal weights:
+    A. Brand-vs-primaryCat gap MoM     60%   → Percentage point scale (3.2)
+    B. Brand Trends index MoM %        40%   → Standard % change scale (3.1)
+
+  Rising tide detection logic:
+    risingTide = TRUE when EITHER of the following is true:
+      (1) Brand index increased MoM AND primary category term increased MoM
+          AND category increase ≥ 50% of brand increase
+      (2) Brand index decreased MoM AND primary category term decreased MoM
+          AND category decrease ≥ 50% of brand decrease
+    Both cases mean category momentum is a material factor in brand movement.
+
+  Rising tide modifier on this dimension:
+    If risingTide = TRUE: apply 0.90 multiplier to final Category Context score.
+    If risingTide = FALSE: no modifier.
+
+  Small brand handling (brand index 0–2 in this query):
+    Signal A uses absolute index value instead of gap:
+      index = 0: score 30
+      index = 1: score 48
+      index = 2: score 60
+      index ≥ 3: use gap method (standard calculation)
+    Rationale: a brand with index 0 vs a category term at 80 has a gap of -80
+    every month — that gap is meaningless for trend analysis.
+
+  Missing data handling:
+    Trends Export 2 unavailable: dimension excluded from BVI.
+    Rising tide flag defaults to FALSE if dimension is excluded.
+    Flag: "Category Context excluded — Trends Export 2 not uploaded."
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 5: SIGNAL COMPOSITION AND MoM COMPARABILITY
+───────────────────────────────────────────────────────────────────
+
+5.1 SIGNAL COMPOSITION RECORD
+  Every scored month records a "signals active" fingerprint:
+  a sorted list of dimension IDs that contributed to that month's BVI.
+  Example: ["search","digital","competitive","category"]
+  Example with social: ["search","digital","social","competitive","category"]
+
+5.2 MoM DELTA COMPARABILITY RULE
+  The MoM delta (displayed on score cards, history table, and sparkline)
+  is only shown as a number when the current month and prior month have
+  IDENTICAL signals active fingerprints.
+
+  If fingerprints differ:
+    Display: "—" for the delta value
+    Tooltip/flag: "Signal composition changed — [added: X] [removed: Y].
+                   Score not directly comparable to prior month."
+
+  This rule prevents a BVI jump from appearing to be brand momentum
+  when it is actually caused by a new data source being added.
+
+5.3 FIRST TIME A SIGNAL IS ADDED
+  When a dimension appears for the first time in month N:
+    Month N: dimension scores normally. MoM delta = "—" (no prior comparable).
+    Month N+1: first valid MoM comparison for that dimension.
+    The score card in month N shows a "New signal" badge on that dimension.
+
+5.4 SIGNAL REMOVAL (data gap in a previously active month)
+  If a dimension was active last month and is missing this month:
+    Dimension excluded from this month's BVI (as per Section 3 rules).
+    MoM delta = "—" (composition changed).
+    Flag: "[Dimension] missing this month — excluded from score."
+    This prevents a score drop from appearing to be brand decline
+    when it is actually caused by missing data.
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 6: FLAGS AND TRANSPARENCY LAYER
+───────────────────────────────────────────────────────────────────
+
+6.1 FLAGS DISPLAYED ON EVERY SCORED MONTH
+  Each month in the results carries a flags array. All active flags
+  are displayed in the UI — never suppressed. Types:
+
+  DATA_GAP
+    Triggered when any dimension is excluded due to missing data.
+    Text: "[Dimension name] excluded — [source] data not uploaded."
+    Display: amber badge on score card, row in history table.
+
+  SIGNAL_CHANGE
+    Triggered when current month signal composition differs from prior month.
+    Text: "Signal composition changed vs prior month — MoM delta not shown."
+    Display: on MoM delta field specifically.
+
+  RISING_TIDE
+    Triggered when Category Context detects risingTide = TRUE.
+    Text: "Rising tide detected — category growing alongside brand.
+           Some BVI movement may reflect category momentum."
+    Display: yellow ring on sparkline data point, flag in narrative.
+
+  LARGE_SWING
+    Triggered when any signal MoM change exceeds ±40%.
+    Text: "[Signal name] moved [value]% — unusually large swing.
+           Score contribution capped at ±40% equivalent.
+           Review for campaign activity or data anomaly."
+    Display: noted in narrative prompt so Claude addresses it.
+
+  BASELINE_MONTH
+    Triggered for the first month in the dataset.
+    Text: "Baseline month — no prior data to compare. MoM signals scored neutral."
+    Display: "Baseline" label instead of MoM delta.
+
+  SINGLE_PLATFORM_SOCIAL
+    Triggered when only one of Instagram or TikTok data is entered.
+    Text: "Organic Social scored on [Instagram/TikTok] only."
+    Display: noted on Organic Social dimension row.
+
+6.2 CONFIDENCE TIER
+  Displayed as a badge on the score card. Does not affect score calculation.
+  Bronze: Search + Digital + Competitive + Category active (any subset)
+  Silver: Bronze + Social Listening + Paid Brand Efficiency active
+  Gold:   Silver + Direct Awareness active
+
+  If fewer than 2 dimensions are active: display "Insufficient data"
+  instead of a BVI score. Do not show a number.
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 7: NARRATIVE GENERATION (Claude API)
+───────────────────────────────────────────────────────────────────
+
+7.1 WHAT CLAUDE RECEIVES
+  After all scores are calculated, Claude API is called once per month.
+  Claude receives a structured payload containing:
+    - Final BVI score and MoM delta (if comparable)
+    - All dimension scores
+    - The key signals that drove each dimension score
+    - All active flags for this month
+    - Client name, competitors, category terms
+    - Confidence tier
+
+7.2 WHAT CLAUDE PRODUCES
+  A 2–3 sentence narrative. Nothing else.
+  Claude does NOT recalculate scores.
+  Claude does NOT override or question the scores.
+  Claude explains what happened and why, in plain English.
+
+7.3 LOCKED NARRATIVE RULES (enforced in prompt)
+  - Lead with the BVI score and its primary driver
+  - Second sentence: the strongest positive or negative signal
+  - Third sentence (if warranted): a flag, watch item, or context note
+  - If RISING_TIDE flag is active: must mention it in the narrative
+  - If LARGE_SWING flag is active: must acknowledge it
+  - If SIGNAL_CHANGE flag is active: must note scores are not directly comparable
+  - No em dashes anywhere
+  - No hollow openers: "This month", "Overall", "In summary", "Looking at"
+  - No hedging when data is clear: say "grew" not "appears to have grown"
+  - No mention of weights, methodology, or scoring mechanics
+  - No banned words (see PDM brand guidelines)
+
+7.4 BANNED WORDS IN NARRATIVE
+  delve, intricate, tapestry, pivotal, underscore, landscape, foster,
+  testament, enhance, crucial, moreover, realm, beacon, synergy,
+  revolutionize, transformative, game-changer, cutting-edge, comprehensive,
+  utilize, robust, leverage, streamline, empower, seamlessly, holistic,
+  actionable, impactful, elevate, unlock, nuanced, curate
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 8: DATA SOURCES REFERENCE — v1 BRONZE TIER
+───────────────────────────────────────────────────────────────────
+
+  Source              Format    Export path
+  ─────────────────────────────────────────────────────────────────────────────
+  Google Search       ZIP       GSC → Performance → Search results →
+  Console (GSC)                 Remove all filters → Last 16 months →
+                                Export → Download CSV (returns ZIP)
+
+  Google Trends       CSV       trends.google.com → brand + competitors
+  Export 1                      in one query → Interest over time → ↓
+
+  Google Trends       CSV       trends.google.com → brand + category terms
+  Export 2                      in separate query → Interest over time → ↓
+
+  GA4 Traffic         CSV       GA4 → Reports → Acquisition →
+  Acquisition                   Traffic acquisition → Date dimension: Month →
+                                Download CSV
+
+  Instagram           Manual    Meta Business Suite → Insights →
+                      entry     read: Reach, Followers, Engagement rate
+
+  TikTok              Manual    TikTok Studio (studio.tiktok.com) →
+                      entry     Analytics → read: Views, Followers, Engagement
+
+  SEMrush             Manual    SEMrush → Keyword Overview →
+                      entry     sum Volume for category terms
+
+
+───────────────────────────────────────────────────────────────────
+SECTION 9: VERSION HISTORY
+───────────────────────────────────────────────────────────────────
+
+  v1.0  May 2026  Initial specification. Relative scoring approach defined.
+                  Bronze tier only. Claude API for narrative only.
+
+  v1.1  May 2026  Added Section 5 (signal composition and MoM comparability).
+                  Added Section 6 (flags and transparency layer).
+                  Removed all dummy data provisions — data exists or it doesn't.
+                  Clarified Instagram/TikTok as manual entry for v1.
+                  Small brand handling added to Category Context (4.5).
+                  Large swing cap added to Section 3.5.
+
+
+───────────────────────────────────────────────────────────────────
+END OF SPECIFICATION
+───────────────────────────────────────────────────────────────────

@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BVI Dashboard — Kurt Geiger London (Demo)</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Darker+Grotesque:wght@400;600;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Darker Grotesque',Arial,Helvetica,sans-serif;background:#F5F5F5;color:#2B2A29;font-size:14px}
+button{font-family:'Darker Grotesque',Arial,Helvetica,sans-serif;cursor:pointer}
+.card{background:#fff;border:0.5px solid rgba(171,171,171,0.3);border-radius:8px;padding:14px}
+.purple-card{background:#7756FF;border-radius:10px;padding:18px}
+.dark-card{background:#2B2A29;border-radius:8px;padding:12px 14px}
+.label{font-size:10px;color:#ABABAB;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.big-num{font-size:22px;font-weight:700;color:#2B2A29;line-height:1.1}
+.delta-up{font-size:11px;color:#0F6E56;background:#E1F5EE;padding:1px 6px;border-radius:4px;font-weight:600}
+.delta-dn{font-size:11px;color:#C0392B;background:#FDECEA;padding:1px 6px;border-radius:4px;font-weight:600}
+.delta-nt{font-size:11px;color:#ABABAB;background:rgba(171,171,171,.12);padding:1px 6px;border-radius:4px;font-weight:600}
+.status-improving{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:#E1F5EE;color:#0F6E56;border:0.5px solid #5DCAA5;white-space:nowrap}
+.status-stable{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:#F1EFE8;color:#5F5E5A;border:0.5px solid #B4B2A9;white-space:nowrap}
+.status-declining{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:#FDECEA;color:#C0392B;border:0.5px solid #F09595;white-space:nowrap}
+.status-watch{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:#FAF0DA;color:#BA7517;border:0.5px solid #FAC775;white-space:nowrap}
+.tab-btn{flex:1;padding:10px 6px;font-size:11px;font-weight:400;color:#ABABAB;background:transparent;border:none;border-bottom:2px solid transparent;min-width:100px;white-space:nowrap;transition:all .15s}
+.tab-btn.active{font-weight:700;color:#7756FF;background:rgba(119,86,255,.05);border-bottom:2px solid #7756FF}
+.tab-btn:hover:not(.active){color:#2B2A29}
+.dim-row{border-bottom:0.5px solid rgba(171,171,171,.15)}
+.dim-header{display:flex;align-items:flex-start;justify-content:space-between;padding:10px 0;cursor:pointer}
+.dim-expand{background:#F5F5F5;border-radius:7px;padding:12px 14px;margin-bottom:10px}
+.comp-bar-wrap{height:4px;background:rgba(171,171,171,.2);border-radius:2px;overflow:hidden;margin-top:5px}
+.tier-btn{padding:3px 10px;border-radius:5px;border:none;font-size:10px;font-weight:400;color:#ABABAB;background:transparent;text-transform:capitalize;transition:all .15s}
+.tier-btn.active{font-weight:700}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto}
+.modal-box{background:#F5F5F5;border-radius:12px;width:100%;max-width:740px;box-shadow:0 24px 64px rgba(0,0,0,.4)}
+.modal-header{background:#2B2A29;border-radius:12px 12px 0 0;padding:18px 22px;display:flex;align-items:center;justify-content:space-between}
+.close-btn{width:32px;height:32px;border-radius:6px;border:0.5px solid rgba(171,171,171,.4);background:transparent;color:#ABABAB;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1}
+.hidden{display:none}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.note-box{padding:8px 12px;background:#F5F5F5;border-radius:6px;font-size:11px;color:#ABABAB}
+.signal-tag{font-size:11px;padding:3px 10px;border-radius:4px;background:rgba(119,86,255,.1);color:#7756FF;font-weight:600}
+.scale-row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:0.5px solid rgba(171,171,171,.1)}
+</style>
+</head>
+<body>
+<div id="app" style="max-width:1140px;margin:0 auto;padding:20px"></div>
+
+<div id="modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div class="label" style="color:#AFAAF9;margin-bottom:3px">Scoring methodology</div>
+        <div id="modal-title" style="font-size:18px;font-weight:700;color:#F5F5F5"></div>
+        <div id="modal-weight" style="font-size:12px;color:#ABABAB;margin-top:2px"></div>
+      </div>
+      <button class="close-btn" onclick="closeModal()">×</button>
+    </div>
+    <div id="modal-body" style="padding:20px 22px"></div>
+  </div>
+</div>
+
+<script>
+// ── COLORS ──────────────────────────────────────────────────────────────────
+const B = {
+  nearBlack:"#2B2A29", purple:"#7756FF", lightPurple:"#AFAAF9",
+  gray:"#ABABAB", offWhite:"#F5F5F5", yellow:"#E3FF43", white:"#FFFFFF",
+  green:"#0F6E56", greenBg:"#E1F5EE", greenBorder:"#5DCAA5",
+  amber:"#BA7517", amberBg:"#FAF0DA",
+  red:"#C0392B", redBg:"#FDECEA"
+};
+
+// ── DATA ────────────────────────────────────────────────────────────────────
+const MONTHS = ["May '25","Jun '25","Jul '25","Aug '25","Sep '25","Oct '25","Nov '25","Dec '25","Jan '26","Feb '26","Mar '26","Apr '26"];
+const CAT_TRENDS  = [48,49,50,51,52,51,53,52,53,54,54,55];
+const CAT_TRENDS2 = [46,47,48,50,51,50,52,51,51,52,53,54];
+const CAT_TRENDS3 = [44,45,45,47,48,47,50,49,50,51,51,52];
+
+const RAW = [
+  {bvi:52,status:"backfill",impressions:1900,impressionsDelta:-3,clicks:142,clicksDelta:-2,ctr:7.4,ctrDelta:-0.1,position:4.2,positionDelta:0.1,trendsIdx:52,trendsIdxDelta:null,trendsYoY:null,directSessions:184,directSessionsDelta:null,directPct:28,directPctDelta:null,organicSessions:312,organicSessionsDelta:null,brandedOrganic:34,brandedOrganicDelta:null,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:52,smTrends:44,carTrends:22,tedTrends:19,kgVol:201,smVol:178,carVol:82,tedVol:74,brandShare:38,brandShareDelta:null,catTrends:48,catVol:920,catVolDelta:null,risingTide:false,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"Branded Trends index steady at 52. No social data for this period.",whyItMoved:"Backfill month — Base tier signals only. No meaningful MoM comparison available.",categoryContext:"Brand Trends index (52) outpacing category index (48). No rising-tide pattern.",competitiveShift:"Kurt Geiger holding #1. Steve Madden closest challenger at index 44.",recommendation:"Establish baseline. First live month data will determine whether search position is strengthening or plateauing."},
+  {bvi:54,status:"backfill",impressions:2000,impressionsDelta:5,clicks:148,clicksDelta:4,ctr:7.4,ctrDelta:0.0,position:4.1,positionDelta:-0.1,trendsIdx:54,trendsIdxDelta:2,trendsYoY:null,directSessions:191,directSessionsDelta:4,directPct:29,directPctDelta:1,organicSessions:318,organicSessionsDelta:2,brandedOrganic:35,brandedOrganicDelta:1,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:54,smTrends:45,carTrends:23,tedTrends:19,kgVol:210,smVol:182,carVol:85,tedVol:75,brandShare:38,brandShareDelta:0,catTrends:49,catVol:942,catVolDelta:1,risingTide:false,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI +2. Branded impressions up 5%, direct traffic share up 1pt.",whyItMoved:"Steady organic search growth. Kurt Geiger tracking proportionally.",categoryContext:"Brand Trends (54) vs. category (49). Growth proportional — no rising-tide flag.",competitiveShift:"No meaningful shift. Steve Madden stable at 45. Gap to #1 holding at 9pts.",recommendation:"Monitor whether direct traffic share improvement sustains into Q3."},
+  {bvi:53,status:"backfill",impressions:1850,impressionsDelta:-7,clicks:138,clicksDelta:-7,ctr:7.5,ctrDelta:0.1,position:4.3,positionDelta:0.2,trendsIdx:51,trendsIdxDelta:-3,trendsYoY:null,directSessions:188,directSessionsDelta:-2,directPct:29,directPctDelta:0,organicSessions:310,organicSessionsDelta:-3,brandedOrganic:34,brandedOrganicDelta:-1,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:51,smTrends:43,carTrends:22,tedTrends:18,kgVol:205,smVol:185,carVol:84,tedVol:76,brandShare:37,brandShareDelta:-1,catTrends:50,catVol:960,catVolDelta:2,risingTide:true,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI -1. Branded impressions -7%, Trends index -3pts. Category index rose 1pt concurrently.",whyItMoved:"Rising-tide pattern. Category grew while brand dipped — seasonal redistribution, not brand weakness.",categoryContext:"Brand Trends (51) now below category (50). Rising-tide flag active.",competitiveShift:"Steve Madden gained slightly. Worth monitoring.",recommendation:"Do not read July dip as brand weakness — category context clears it."},
+  {bvi:56,status:"backfill",impressions:2100,impressionsDelta:14,clicks:158,clicksDelta:14,ctr:7.5,ctrDelta:0.0,position:4.0,positionDelta:-0.3,trendsIdx:55,trendsIdxDelta:4,trendsYoY:null,directSessions:198,directSessionsDelta:5,directPct:30,directPctDelta:1,organicSessions:326,organicSessionsDelta:5,brandedOrganic:36,brandedOrganicDelta:2,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:55,smTrends:44,carTrends:22,tedTrends:19,kgVol:220,smVol:180,carVol:83,tedVol:72,brandShare:40,brandShareDelta:3,catTrends:51,catVol:958,catVolDelta:0,risingTide:false,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI +3. Branded impressions +14%, branded search share +3pts.",whyItMoved:"Brand-driven recovery. Category index flat — genuine outperformance.",categoryContext:"Brand (55) back above category (51). Gains are brand-specific.",competitiveShift:"Steve Madden dropped 1pt to 44. Gap widened to 11pts.",recommendation:"August recovery confirms July was seasonal. Watch whether search share above 40% holds into Q4."},
+  {bvi:58,status:"backfill",impressions:2200,impressionsDelta:5,clicks:163,clicksDelta:3,ctr:7.4,ctrDelta:-0.1,position:3.9,positionDelta:-0.1,trendsIdx:58,trendsIdxDelta:3,trendsYoY:null,directSessions:204,directSessionsDelta:3,directPct:31,directPctDelta:1,organicSessions:334,organicSessionsDelta:2,brandedOrganic:37,brandedOrganicDelta:1,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:58,smTrends:45,carTrends:23,tedTrends:20,kgVol:228,smVol:178,carVol:82,tedVol:71,brandShare:41,brandShareDelta:1,catTrends:52,catVol:978,catVolDelta:2,risingTide:false,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI +2. Trends index +3pts, position improved to 3.9, direct traffic +1pt.",whyItMoved:"Continued brand-driven growth. Category rose 2pts but brand outpaced by 3pts net.",categoryContext:"Brand (58) vs. category (52) — 6pt outperformance. Strongest gap in backfill window.",competitiveShift:"All competitors flat. Lead over Steve Madden at its widest.",recommendation:"Entering Q4 from a position of strength. Ensure paid brand defends this during peak season."},
+  {bvi:57,status:"backfill",impressions:2150,impressionsDelta:-2,clicks:160,clicksDelta:-2,ctr:7.4,ctrDelta:0.0,position:4.0,positionDelta:0.1,trendsIdx:56,trendsIdxDelta:-2,trendsYoY:null,directSessions:208,directSessionsDelta:2,directPct:32,directPctDelta:1,organicSessions:330,organicSessionsDelta:-1,brandedOrganic:36,brandedOrganicDelta:-1,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:56,smTrends:45,carTrends:23,tedTrends:20,kgVol:222,smVol:179,carVol:83,tedVol:73,brandShare:40,brandShareDelta:-1,catTrends:51,catVol:962,catVolDelta:-1,risingTide:false,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI -1. Branded search -2%, direct traffic +1pt to 32%.",whyItMoved:"Minor post-peak normalization. Direct traffic improvement offsets the dip.",categoryContext:"Category dipped 1pt alongside brand. Relative position unchanged.",competitiveShift:"Competitors stable. Steve Madden at 45, gap unchanged at 11pts.",recommendation:"Direct traffic share at 32% — three consecutive months of growth signals genuine awareness building."},
+  {bvi:60,status:"backfill",impressions:2400,impressionsDelta:12,clicks:178,clicksDelta:11,ctr:7.4,ctrDelta:0.0,position:3.8,positionDelta:-0.2,trendsIdx:61,trendsIdxDelta:5,trendsYoY:null,directSessions:218,directSessionsDelta:5,directPct:33,directPctDelta:1,organicSessions:352,organicSessionsDelta:7,brandedOrganic:38,brandedOrganicDelta:2,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:61,smTrends:47,carTrends:24,tedTrends:21,kgVol:238,smVol:176,carVol:81,tedVol:70,brandShare:42,brandShareDelta:2,catTrends:53,catVol:998,catVolDelta:2,risingTide:true,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI +3. Branded impressions +12%, Trends +5pts, position improved to 3.8.",whyItMoved:"Brand momentum plus category-wide holiday lift. Rising-tide: category +2pts concurrent.",categoryContext:"Rising-tide active. Brand (61) vs. category (53) — outperforming, but category lifting all boats.",competitiveShift:"Steve Madden rose to 47. Watch for Q4 share erosion.",recommendation:"Separate brand-driven signal from category lift before client reporting."},
+  {bvi:59,status:"backfill",impressions:2350,impressionsDelta:-2,clicks:174,clicksDelta:-2,ctr:7.4,ctrDelta:0.0,position:3.9,positionDelta:0.1,trendsIdx:59,trendsIdxDelta:-2,trendsYoY:null,directSessions:214,directSessionsDelta:-2,directPct:32,directPctDelta:-1,organicSessions:344,organicSessionsDelta:-2,brandedOrganic:37,brandedOrganicDelta:-1,followerGrowthRate:null,followerGrowthRateDelta:null,netFollowerGrowth:null,reach:null,engagementRate:null,engagementRateDelta:null,kgTrends:59,smTrends:48,carTrends:25,tedTrends:21,kgVol:234,smVol:184,carVol:86,tedVol:77,brandShare:37,brandShareDelta:-5,catTrends:52,catVol:982,catVolDelta:-1,risingTide:false,mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,brandedCpmGoogle:null,brandedCpmMeta:null,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:null,impressionShareDelta:null,paidCtr:null,paidCtrDelta:null,whatMoved:"BVI -1. Branded search share -5pts, Steve Madden index +1pt to 48.",whyItMoved:"Peak-season competitor spend compressed branded search share.",categoryContext:"Category eased 1pt alongside brand. Share erosion is competitive.",competitiveShift:"Steve Madden at 48 — closest gap all year at 11pts.",recommendation:"Audit branded paid search for December — 5pt share drop suggests competitors outbidding on branded terms."},
+  {bvi:58,status:"live",impressions:2100,impressionsDelta:-11,clicks:155,clicksDelta:-11,ctr:7.4,ctrDelta:0.0,position:4.1,positionDelta:0.2,trendsIdx:54,trendsIdxDelta:-5,trendsYoY:4,directSessions:206,directSessionsDelta:-4,directPct:33,directPctDelta:1,organicSessions:328,organicSessionsDelta:-5,brandedOrganic:36,brandedOrganicDelta:-1,followerGrowthRate:2.1,followerGrowthRateDelta:null,netFollowerGrowth:4200,reach:820,engagementRate:3.4,engagementRateDelta:null,kgTrends:54,smTrends:43,carTrends:22,tedTrends:18,kgVol:228,smVol:180,carVol:84,tedVol:74,brandShare:38,brandShareDelta:1,catTrends:53,catVol:1004,catVolDelta:2,risingTide:false,mentionVol:14200,mentionVolDelta:null,sentimentPct:71,sentimentDelta:null,sov:28,sovDelta:null,earnedReach:4100,influencerReach:1800,emv:124,kgSentiment:71,smSentiment:58,carSentiment:63,tedSentiment:55,brandedCpmGoogle:2.14,brandedCpmMeta:3.42,cpmGoogleDelta:null,cpmMetaDelta:null,impressionShare:74,impressionShareDelta:null,paidCtr:8.2,paidCtrDelta:null,whatMoved:"BVI at 58. Search index -5pts (post-holiday). Direct traffic share held at 33%. Social and listening now active.",whyItMoved:"Seasonal search decline following peak. Category held flat — dip is proportional.",categoryContext:"Category (53) steady while brand index fell 5pts. First month brand tracking below category.",competitiveShift:"Steve Madden dropped back to 43, gap widened to 11pts. December pressure did not persist.",recommendation:"January dip is seasonal noise. Watch whether direct traffic share sustains above 33% in February."},
+  {bvi:60,status:"live",impressions:2150,impressionsDelta:2,clicks:160,clicksDelta:3,ctr:7.4,ctrDelta:0.0,position:4.0,positionDelta:-0.1,trendsIdx:56,trendsIdxDelta:2,trendsYoY:6,directSessions:212,directSessionsDelta:3,directPct:34,directPctDelta:1,organicSessions:334,organicSessionsDelta:2,brandedOrganic:37,brandedOrganicDelta:1,followerGrowthRate:2.3,followerGrowthRateDelta:0.2,netFollowerGrowth:4600,reach:854,engagementRate:3.8,engagementRateDelta:0.4,kgTrends:56,smTrends:43,carTrends:22,tedTrends:19,kgVol:234,smVol:178,carVol:83,tedVol:72,brandShare:40,brandShareDelta:2,catTrends:54,catVol:1020,catVolDelta:1,risingTide:false,mentionVol:15800,mentionVolDelta:11,sentimentPct:74,sentimentDelta:3,sov:30,sovDelta:2,earnedReach:4600,influencerReach:2100,emv:148,kgSentiment:74,smSentiment:59,carSentiment:64,tedSentiment:56,brandedCpmGoogle:2.08,brandedCpmMeta:3.31,cpmGoogleDelta:-3,cpmMetaDelta:-3,impressionShare:77,impressionShareDelta:3,paidCtr:8.6,paidCtrDelta:0.4,whatMoved:"BVI +2. Direct traffic +1pt to 34% (second consecutive month). Engagement +0.4pts. Trends YoY +6%.",whyItMoved:"Organic brand momentum building. Search growth outpacing category YoY.",categoryContext:"Brand (56) vs. category (54) — outperforming by 2pts. Brand growing faster.",competitiveShift:"Steve Madden flat at 43. Kurt Geiger extending lead.",recommendation:"Two consecutive months of direct traffic share above 33% is a genuine awareness signal. Use as headline in next client review."},
+  {bvi:59,status:"live",impressions:2140,impressionsDelta:0,clicks:158,clicksDelta:-1,ctr:7.4,ctrDelta:0.0,position:4.0,positionDelta:0.0,trendsIdx:55,trendsIdxDelta:-1,trendsYoY:5,directSessions:208,directSessionsDelta:-2,directPct:33,directPctDelta:-1,organicSessions:330,organicSessionsDelta:-1,brandedOrganic:36,brandedOrganicDelta:-1,followerGrowthRate:2.0,followerGrowthRateDelta:-0.3,netFollowerGrowth:4100,reach:838,engagementRate:3.6,engagementRateDelta:-0.2,kgTrends:55,smTrends:43,carTrends:23,tedTrends:19,kgVol:231,smVol:179,carVol:84,tedVol:73,brandShare:39,brandShareDelta:-1,catTrends:54,catVol:1032,catVolDelta:1,risingTide:true,mentionVol:14900,mentionVolDelta:-6,sentimentPct:72,sentimentDelta:-2,sov:29,sovDelta:-1,earnedReach:4300,influencerReach:1950,emv:138,kgSentiment:72,smSentiment:60,carSentiment:63,tedSentiment:57,brandedCpmGoogle:2.19,brandedCpmMeta:3.48,cpmGoogleDelta:5,cpmMetaDelta:5,impressionShare:76,impressionShareDelta:-1,paidCtr:8.4,paidCtrDelta:-0.2,whatMoved:"BVI -1. Direct traffic -1pt, follower growth -0.3pts, mention volume -6%, sentiment -2pts.",whyItMoved:"Rising-tide flag active — category growing faster than brand. March dip may be noise or early sign of plateauing.",categoryContext:"Rising-tide detected. Category (54) growing while brand (55) effectively flat.",competitiveShift:"Carvela index ticked up to 23. Steve Madden flat.",recommendation:"Do not overreact to a single-month dip. If direct traffic drops below 33% again in April, revisit strategy."},
+  {bvi:63,status:"live",impressions:2400,impressionsDelta:18,clicks:181,clicksDelta:15,ctr:7.5,ctrDelta:0.1,position:3.8,positionDelta:-0.2,trendsIdx:61,trendsIdxDelta:6,trendsYoY:18,directSessions:224,directSessionsDelta:8,directPct:36,directPctDelta:3,organicSessions:358,organicSessionsDelta:8,brandedOrganic:39,brandedOrganicDelta:3,followerGrowthRate:1.8,followerGrowthRateDelta:-0.2,netFollowerGrowth:3800,reach:872,engagementRate:3.7,engagementRateDelta:0.1,kgTrends:61,smTrends:44,carTrends:22,tedTrends:19,kgVol:246,smVol:176,carVol:82,tedVol:71,brandShare:43,brandShareDelta:4,catTrends:55,catVol:1048,catVolDelta:1,risingTide:false,mentionVol:18400,mentionVolDelta:23,sentimentPct:78,sentimentDelta:6,sov:34,sovDelta:5,earnedReach:5800,influencerReach:2900,emv:196,kgSentiment:78,smSentiment:58,carSentiment:62,tedSentiment:54,brandedCpmGoogle:1.98,brandedCpmMeta:3.22,cpmGoogleDelta:-5,cpmMetaDelta:-7,impressionShare:81,impressionShareDelta:5,paidCtr:8.9,paidCtrDelta:0.5,whatMoved:"BVI +4. Branded impressions +18% YoY, direct traffic +3pts to 36%, Trends +6pts, mention volume +23%, sentiment +6pts.",whyItMoved:"Brand-driven growth across every dimension. Clearest signal of genuine momentum in the 12-month window.",categoryContext:"Brand (61) vs. category (55) — widest outperformance gap since September.",competitiveShift:"Steve Madden at 44 — gap to Kurt Geiger widened to 17pts. All competitors stable or declining.",recommendation:"April is the strongest month in the tracking period. Recommend presenting as validation of brand investment."}
+];
+
+const SURVEYS = [
+  {monthIdx:8, date:"Jan 2026", fieldingDate:"15-22 Jan 2026", sampleSize:800, audienceType:"Cold / prospective", unaidedRecall:12, aidedAwareness:38, consideration:24, preference:9},
+  {monthIdx:11, date:"Apr 2026", fieldingDate:"1-8 Apr 2026", sampleSize:850, audienceType:"Cold / prospective", unaidedRecall:15, aidedAwareness:43, consideration:27, preference:11},
+];
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let state = { idx: 11, tier: "gold", tab: "search", expandedDims: {} };
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+function fmt(v, dec=0) { return v == null ? "—" : Number(v).toLocaleString('en-US', {minimumFractionDigits:dec, maximumFractionDigits:dec}); }
+function fmtSign(v, suf="") { if(v==null) return "—"; return (v>0?"+":"")+v+suf; }
+
+function delta(val, suf="", inv=false) {
+  if(val==null||val===undefined) return `<span class="delta-nt">—</span>`;
+  const up = inv ? val<0 : val>0;
+  const neutral = val===0;
+  const cls = neutral ? "delta-nt" : up ? "delta-up" : "delta-dn";
+  const arr = val>0?"↑":val<0?"↓":"→";
+  return `<span class="${cls}">${arr} ${Math.abs(val)}${suf}</span>`;
+}
+
+function statusBadge(status) {
+  const cls = "status-"+status.toLowerCase();
+  return `<span class="${cls}">${status}</span>`;
+}
+
+function getSurvey(monthIdx) {
+  const c = SURVEYS.filter(s => s.monthIdx <= monthIdx);
+  return c.length ? c[c.length-1] : null;
+}
+function getStaleness(surveyIdx, curIdx) {
+  const m = curIdx - surveyIdx;
+  return m<=1?"fresh":m<=3?"amber":"stale";
+}
+
+// ── SIGNAL STATUS LOGIC ──────────────────────────────────────────────────────
+function calcDimStatus(dimId, d, prev) {
+  if(dimId==="search") {
+    const deltas=[d.impressionsDelta,d.clicksDelta,d.trendsIdxDelta].filter(x=>x!=null);
+    const pos=deltas.filter(x=>x>0).length, neg=deltas.filter(x=>x<0).length;
+    if(d.risingTide) return {status:"Watch",
+      headline:`Trends index ${d.trendsIdx}/100 but category rising in parallel`,
+      factors:[
+        {label:"Branded impressions",val:`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%`,positive:d.impressionsDelta>0},
+        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0},
+        {label:"Category context",val:"Rising tide detected",positive:false,note:"Category rising alongside brand — gains may not be brand-specific"}
+      ],
+      method:"Watch applied when category index moves in the same direction as brand, reducing confidence that gains are brand-driven."};
+    if(pos>=2) return {status:"Improving",
+      headline:`Branded impressions ${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%, Trends index ${d.trendsIdx}/100`,
+      factors:[
+        {label:"Branded impressions",val:`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}% MoM`,positive:d.impressionsDelta>0},
+        {label:"Branded clicks",val:`${(d.clicksDelta>0?"+":"")+d.clicksDelta}% MoM`,positive:d.clicksDelta>0},
+        {label:"Avg position",val:`${d.position}`,positive:(d.positionDelta||0)<=0,note:"Lower = better ranking"},
+        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0}
+      ],
+      method:"Improving = majority of branded impressions, clicks, and Trends index moving positively MoM."};
+    if(neg>=2) return {status:"Declining",
+      headline:`Branded impressions ${d.impressionsDelta}%, Trends index ${d.trendsIdx}/100`,
+      factors:[
+        {label:"Branded impressions",val:`${d.impressionsDelta}% MoM`,positive:false},
+        {label:"Branded clicks",val:`${d.clicksDelta}% MoM`,positive:false},
+        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0}
+      ],
+      method:"Declining = majority of branded impressions, clicks, and Trends index moving negatively MoM."};
+    return {status:"Stable",
+      headline:`Branded impressions ${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%, Trends index ${d.trendsIdx}/100`,
+      factors:[
+        {label:"Branded impressions",val:`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}% MoM`,positive:d.impressionsDelta>0},
+        {label:"Branded clicks",val:`${(d.clicksDelta>0?"+":"")+d.clicksDelta}% MoM`,positive:d.clicksDelta>0},
+        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0}
+      ],
+      method:"Stable = mixed or flat signals with no clear directional trend."};
+  }
+  if(dimId==="digital") {
+    const pos=[d.directPctDelta,d.brandedOrganicDelta].filter(x=>x!=null&&x>0).length;
+    const neg=[d.directPctDelta,d.brandedOrganicDelta].filter(x=>x!=null&&x<0).length;
+    const status=pos>=2?"Improving":neg>=2?"Declining":"Stable";
+    return {status,
+      headline:`Direct traffic ${d.directPct}% of sessions, branded organic split ${d.brandedOrganic}%`,
+      factors:[
+        {label:"Direct sessions",val:d.directSessionsDelta!=null?`${(d.directSessionsDelta>0?"+":"")+d.directSessionsDelta}%`:"--",positive:(d.directSessionsDelta||0)>=0},
+        {label:"Direct % of total",val:`${d.directPct}%`,positive:(d.directPctDelta||0)>=0},
+        {label:"Total organic sessions",val:d.organicSessionsDelta!=null?`${(d.organicSessionsDelta>0?"+":"")+d.organicSessionsDelta}%`:"--",positive:(d.organicSessionsDelta||0)>=0},
+        {label:"Branded organic split",val:`${d.brandedOrganic}%`,positive:(d.brandedOrganicDelta||0)>=0}
+      ],
+      method:"Status from MoM direction of direct traffic % and branded organic split. These most directly reflect brand recall."};
+  }
+  if(dimId==="social") {
+    if(!d.followerGrowthRate) return null;
+    const erD=d.engagementRateDelta||0, grD=d.followerGrowthRateDelta||0;
+    const status=erD>0&&grD>=0?"Improving":erD<0&&grD<0?"Declining":(erD<0||grD<0)?"Watch":"Stable";
+    return {status,
+      headline:`Engagement rate ${d.engagementRate}%, follower growth ${d.followerGrowthRate}% MoM`,
+      factors:[
+        {label:"Follower growth rate",val:`${d.followerGrowthRate}% MoM`,positive:grD>=0},
+        {label:"Net follower growth",val:`+${d.netFollowerGrowth!=null?d.netFollowerGrowth.toLocaleString():"--"}`,positive:true},
+        {label:"Organic reach",val:`${d.reach}K`,positive:true},
+        {label:"Engagement rate",val:`${d.engagementRate}%`,positive:erD>=0,note:erD<0?"Declining engagement — watch audience quality":""}
+      ],
+      method:"Primary: engagement rate MoM. Secondary: follower growth rate. Engagement weighted higher as it reflects active audience interest."};
+  }
+  if(dimId==="competitive") {
+    const shareD=d.brandShareDelta||0;
+    const gapNow=d.kgTrends-Math.max(d.smTrends,d.carTrends,d.tedTrends);
+    const gapPrev=prev?prev.kgTrends-Math.max(prev.smTrends,prev.carTrends,prev.tedTrends):gapNow;
+    const gapChg=gapNow-gapPrev;
+    const status=shareD>=2?"Improving":shareD<=-3?"Declining":gapChg<-3?"Watch":"Stable";
+    return {status,
+      headline:`#1 position, ${d.brandShare}% share of branded search, Trends index ${d.kgTrends}`,
+      factors:[
+        {label:"Trends index (Kurt Geiger)",val:`${d.kgTrends}/100`,positive:(d.trendsIdxDelta||0)>=0},
+        {label:"Gap to Steve Madden",val:`${d.kgTrends-d.smTrends} pts`,positive:gapChg>=0,note:gapChg<0?"Gap narrowing — competitor closing":""},
+        {label:"Share of branded search",val:`${d.brandShare}%`,positive:shareD>=0},
+        {label:"Brand Trends index MoM",val:d.trendsIdxDelta!=null?`${(d.trendsIdxDelta>0?"+":"")+d.trendsIdxDelta}%`:"--",positive:(d.trendsIdxDelta||0)>=0}
+      ],
+      method:"Primary: MoM change in share of branded search. Secondary: gap to nearest competitor Trends index."};
+  }
+  if(dimId==="listening") {
+    if(!d.mentionVol) return null;
+    const volUp=(d.mentionVolDelta||0)>0, sentUp=(d.sentimentDelta||0)>=0;
+    const status=volUp&&sentUp?"Improving":volUp&&!sentUp?"Watch":!volUp&&!sentUp?"Declining":"Stable";
+    return {status,
+      headline:`${d.mentionVol.toLocaleString()} mentions, ${d.sentimentPct}% positive, ${d.sov}% SOV`,
+      factors:[
+        {label:"Mention volume",val:d.mentionVolDelta!=null?`${(d.mentionVolDelta>0?"+":"")+d.mentionVolDelta}%`:"--",positive:(d.mentionVolDelta||0)>=0},
+        {label:"Sentiment % positive",val:`${d.sentimentPct}%`,positive:(d.sentimentDelta||0)>=0,note:(d.sentimentDelta||0)<0?"Volume growing but sentiment declining — watch conversation quality":""},
+        {label:"Share of voice",val:`${d.sov}%`,positive:(d.sovDelta||0)>=0},
+        {label:"Earned reach",val:`${d.earnedReach!=null?d.earnedReach.toLocaleString():"--"}K`,positive:true}
+      ],
+      method:"Improving = mention volume up AND sentiment holding or improving. Watch = volume up but sentiment declining — growth without quality is a flag."};
+  }
+  if(dimId==="paid") {
+    if(!d.brandedCpmGoogle) return null;
+    const cpmDown=(d.cpmGoogleDelta||0)<0, isUp=(d.impressionShareDelta||0)>0;
+    const status=cpmDown&&isUp?"Improving":!cpmDown&&!isUp?"Watch":"Stable";
+    return {status,
+      headline:`Google CPM $${d.brandedCpmGoogle}, impression share ${d.impressionShare}%`,
+      factors:[
+        {label:"Branded CPM (Google Ads)",val:`$${d.brandedCpmGoogle}`,positive:(d.cpmGoogleDelta||0)<=0,note:"Lower CPM = more efficient branded spend"},
+        {label:"Branded CPM (Meta)",val:`$${d.brandedCpmMeta}`,positive:(d.cpmMetaDelta||0)<=0},
+        {label:"Search impression share",val:`${d.impressionShare}%`,positive:(d.impressionShareDelta||0)>=0},
+        {label:"Branded paid CTR",val:`${d.paidCtr}%`,positive:(d.paidCtrDelta||0)>=0}
+      ],
+      method:"Status from CPM trend direction (primary) and impression share (secondary). Rising CPM flags either increased demand or competitor pressure."};
+  }
+  return null;
+}
+// ── SVG SPARKLINE (BVI trend) ─────────────────────────────────────────────────
+function sparklineSVG(w, h, curIdx) {
+  const minV=38, maxV=78, n=RAW.length;
+  const xp = i => 2+(i/(n-1))*(w-4);
+  const yp = v => 3+(1-(v-minV)/(maxV-minV))*(h-6);
+  const catPts = CAT_TRENDS.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ");
+  const bfPts = RAW.map((m,i)=>m.status==="backfill"?`${xp(i).toFixed(1)},${yp(m.bvi).toFixed(1)}`:null).filter(Boolean).join(" ");
+  const lvPts = RAW.map((m,i)=>m.status==="live"?`${xp(i).toFixed(1)},${yp(m.bvi).toFixed(1)}`:null).filter(Boolean).join(" ");
+  const cx=xp(curIdx), cy=yp(RAW[curIdx].bvi);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polyline points="${catPts}" fill="none" stroke="${B.lightPurple}" stroke-width="1" opacity="0.4" stroke-dasharray="2,3"/>
+    ${bfPts?`<polyline points="${bfPts}" fill="none" stroke="${B.lightPurple}" stroke-width="1.5" stroke-dasharray="4,3"/>`:""}
+    ${lvPts?`<polyline points="${lvPts}" fill="none" stroke="${B.offWhite}" stroke-width="2"/>`:""}
+    <circle cx="${cx}" cy="${cy}" r="3.5" fill="${B.offWhite}"/>
+  </svg>`;
+}
+
+// ── TREND CHART (main 12-month) ───────────────────────────────────────────────
+function trendChartSVG(curIdx) {
+  const W=620, H=170, pad={l:32,r:12,t:14,b:22}, minV=38, maxV=78, n=RAW.length;
+  const xp = i => pad.l+(i/(n-1))*(W-pad.l-pad.r);
+  const yp = v => pad.t+(1-(v-minV)/(maxV-minV))*(H-pad.t-pad.b);
+  const bfIdx = RAW.map((m,i)=>m.status==="backfill"?i:null).filter(x=>x!==null);
+  const lvIdx = RAW.map((m,i)=>m.status==="live"?i:null).filter(x=>x!==null);
+  const joinIdx = RAW.findIndex(m=>m.status==="live");
+  const catPts = CAT_TRENDS.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ");
+  const bfPts = bfIdx.map(i=>`${xp(i).toFixed(1)},${yp(RAW[i].bvi).toFixed(1)}`).join(" ");
+  const lvPts = lvIdx.map(i=>`${xp(i).toFixed(1)},${yp(RAW[i].bvi).toFixed(1)}`).join(" ");
+  const cx=xp(curIdx), cy=yp(RAW[curIdx].bvi);
+  const gridLines = [45,55,65].map(v=>`
+    <line x1="${pad.l}" y1="${yp(v)}" x2="${W-pad.r}" y2="${yp(v)}" stroke="${B.gray}" stroke-width="0.5" opacity="0.25"/>
+    <text x="${pad.l-5}" y="${yp(v)+3.5}" font-size="9" fill="${B.gray}" text-anchor="end" font-family="'Darker Grotesque',Arial,sans-serif">${v}</text>`).join("");
+  const labels = RAW.map((m,i)=>`<text x="${xp(i)}" y="${H-4}" font-size="9" fill="${i===curIdx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===curIdx?700:400}">${MONTHS[i]}</text>`).join("");
+  const risingRing = RAW[curIdx].risingTide ? `<circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="${B.yellow}" stroke-width="2" opacity="0.7"/>` : "";
+  const joinLine = joinIdx>0 ? `<line x1="${xp(joinIdx-1)}" y1="${yp(RAW[joinIdx-1].bvi)}" x2="${xp(joinIdx)}" y2="${yp(RAW[joinIdx].bvi)}" stroke="${B.purple}" stroke-width="1.5" stroke-dasharray="2,2"/>` : "";
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
+    ${gridLines}
+    <polyline points="${catPts}" fill="none" stroke="${B.gray}" stroke-width="1.5" stroke-dasharray="3,4" opacity="0.6"/>
+    ${bfPts?`<polyline points="${bfPts}" fill="none" stroke="${B.lightPurple}" stroke-width="2" stroke-dasharray="5,3"/>`:""}
+    ${joinLine}
+    ${lvPts?`<polyline points="${lvPts}" fill="none" stroke="${B.purple}" stroke-width="2.5"/>`:""}
+    ${risingRing}
+    <circle cx="${cx}" cy="${cy}" r="4.5" fill="${B.purple}"/>
+    <circle cx="${cx}" cy="${cy}" r="2.5" fill="${B.offWhite}"/>
+    ${labels}
+  </svg>`;
+}
+
+// ── METRIC CARD ───────────────────────────────────────────────────────────────
+function metricCard(label, value, dval, dsuf="", inv=false, tip="", sub="") {
+  return `<div class="card">
+    <div class="label" style="display:flex;align-items:center;gap:4px;margin-bottom:5px">${label}${tip?`<span title="${tip}" style="width:14px;height:14px;border-radius:50%;background:rgba(171,171,171,.25);display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#ABABAB;cursor:help;font-weight:700">?</span>`:""}
+    </div>
+    <div class="big-num">${value}</div>
+    <div style="margin-top:5px">${delta(dval,dsuf,inv)}</div>
+    ${sub?`<div style="font-size:10px;color:#ABABAB;margin-top:4px">${sub}</div>`:""}
+  </div>`;
+}
+
+// ── DIM ROW ──────────────────────────────────────────────────────────────────────────────
+const STATUS_CFG = {
+  Improving:{color:"#0F6E56",bg:"#E1F5EE",border:"#5DCAA5"},
+  Stable:   {color:"#5F5E5A",bg:"#F1EFE8",border:"#B4B2A9"},
+  Declining:{color:"#C0392B",bg:"#FDECEA",border:"#F09595"},
+  Watch:    {color:"#BA7517",bg:"#FAF0DA",border:"#FAC775"},
+};
+
+function dimRow(name, dimId, d, prev, tier, locked) {
+  const dotColor = tier==="base"?B.nearBlack:tier==="silver"?B.lightPurple:B.yellow;
+  const tierTag = tier==="silver"
+    ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#F5F5F5;color:#ABABAB;border:0.5px solid rgba(171,171,171,.4);text-transform:uppercase;letter-spacing:.04em;margin-left:4px">Silver</span>`
+    : tier==="gold"
+    ? `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#F5F5F5;color:#ABABAB;border:0.5px solid rgba(171,171,171,.4);text-transform:uppercase;letter-spacing:.04em;margin-left:4px">Gold</span>`
+    : "";
+
+  if(locked) return `<div class="dim-row" style="opacity:.38">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0">
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="width:6px;height:6px;border-radius:50%;background:${dotColor}"></div>
+        <span style="font-size:12px">${name}</span>${tierTag}
+      </div>
+      <span style="font-size:11px;color:#ABABAB">--</span>
+    </div></div>`;
+
+  const info = calcDimStatus(dimId, d, prev);
+  if(!info) return `<div class="dim-row" style="opacity:.38">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0">
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="width:6px;height:6px;border-radius:50%;background:${dotColor}"></div>
+        <span style="font-size:12px">${name}</span>
+      </div>
+      <span style="font-size:11px;color:#ABABAB">No data</span>
+    </div></div>`;
+
+  const isExpanded = state.expandedDims[dimId];
+  const sc = STATUS_CFG[info.status] || STATUS_CFG.Stable;
+  const factors = info.factors || [];
+  const method = info.method || "";
+
+  const factorRows = factors.map(f => `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid rgba(171,171,171,.2)">
+      <div style="flex:1">
+        <span style="font-size:11px">${f.label}</span>
+        ${f.note ? `<div style="font-size:10px;color:#ABABAB;margin-top:1px">${f.note}</div>` : ""}
+      </div>
+      <span style="font-size:11px;font-weight:700;color:${f.positive?"#0F6E56":"#C0392B"};margin-left:12px;flex-shrink:0">${f.val}</span>
+    </div>`).join("");
+
+  const expandPanel = isExpanded ? `
+    <div style="margin-bottom:10px;background:#F5F5F5;border-radius:7px;padding:12px 14px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#ABABAB;margin-bottom:8px">Contributing factors</div>
+      ${factorRows}
+      <div style="margin-top:10px;padding-top:8px;border-top:0.5px solid rgba(171,171,171,.25)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div style="flex:1">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#ABABAB;margin-bottom:4px">How this status is calculated</div>
+            <div style="font-size:11px;color:#ABABAB;line-height:1.6">${method}</div>
+          </div>
+          <button onclick="event.stopPropagation();openModal('${dimId}')" style="flex-shrink:0;font-size:10px;padding:4px 10px;border-radius:5px;border:0.5px solid #7756FF;background:transparent;color:#7756FF;cursor:pointer;font-family:'Darker Grotesque',Arial,sans-serif;font-weight:600;white-space:nowrap;align-self:flex-end">Scoring spec &#8599;</button>
+        </div>
+      </div>
+    </div>` : "";
+
+  return `<div class="dim-row">
+    <div class="dim-header" onclick="toggleDim('${dimId}')">
+      <div style="display:flex;align-items:flex-start;gap:7px;flex:1;min-width:0">
+        <div style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:4px"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500">${name}</div>
+          <div style="font-size:11px;color:#ABABAB;margin-top:2px;line-height:1.4">${info.headline}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:10px">
+        <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:${sc.bg};color:${sc.color};border:0.5px solid ${sc.border};white-space:nowrap">${info.status}</span>
+        <span style="font-size:11px;color:#ABABAB;display:inline-block;transform:${isExpanded?"rotate(180deg)":"rotate(0deg)"};transition:transform .2s">&#9662;</span>
+      </div>
+    </div>
+    ${expandPanel}
+  </div>`;
+}
+
+// ── TABS CONTENT ──────────────────────────────────────────────────────────────
+function renderSearch(d) {
+  return `<div>
+    <div class="grid4" style="margin-bottom:12px">
+      ${metricCard("Branded impressions",d.impressions.toLocaleString()+"K",d.impressionsDelta,"%","","GSC Performance, filtered to branded queries.")}
+      ${metricCard("Branded clicks",d.clicks.toLocaleString()+"K",d.clicksDelta,"%","","GSC Performance, filtered to branded queries.")}
+      ${metricCard("Branded CTR",d.ctr+"%",d.ctrDelta," pts","","GSC — clicks / impressions on branded queries.")}
+      ${metricCard("Avg position",d.position,d.positionDelta," pts",true,"GSC avg ranking for branded queries. Lower is better.")}
+    </div>
+    <div class="grid2">
+      ${metricCard("Google Trends index",d.trendsIdx+"/100",d.trendsIdxDelta," pts","","Google Trends Export 1 — brand + 3 competitors. Normalized to 100 = peak interest.")}
+      ${metricCard("Trends YoY",d.trendsYoY!=null?(d.trendsYoY>0?"+":"")+d.trendsYoY+"%":"—",null,"","","Current month index vs. same month prior year.")}
+    </div>
+    <div class="note-box" style="margin-top:12px">Google Trends normalizes to 0-100. 100 = peak interest for the period. Use for directional tracking only — does not measure absolute volume.</div>
+  </div>`;
+}
+
+function renderDigital(d) {
+  return `<div class="grid2">
+    ${metricCard("Direct sessions",d.directSessions.toLocaleString()+"K",d.directSessionsDelta,"%","","GA4 Traffic Acquisition — Session channel group = Direct.")}
+    ${metricCard("Direct % of total",d.directPct+"%",d.directPctDelta," pts","","Direct sessions / Grand Total sessions. Grand Total row used as denominator — never sum named channels.")}
+    ${metricCard("Total organic sessions",d.organicSessions.toLocaleString()+"K",d.organicSessionsDelta,"%","","GA4 — Session channel group = Organic Search.")}
+    ${metricCard("Branded organic split",d.brandedOrganic+"%",d.brandedOrganicDelta," pts","","Calculated: GSC branded clicks / GA4 organic sessions. Consistent MoM approximation.")}
+  </div>`;
+}
+
+function renderSocial(d) {
+  if(!d||d.followerGrowthRate==null) return `<div style="padding:32px 0;text-align:center">
+    <div style="font-size:14px;font-weight:600;color:#ABABAB;margin-bottom:6px">No data for this period</div>
+    <div style="font-size:12px;color:#ABABAB;line-height:1.6">Instagram and TikTok retain only 90 days of data. Organic Social tracking began January 2026.</div>
+  </div>`;
+  return `<div>
+    <div class="grid2" style="margin-bottom:10px">
+      ${metricCard("Follower growth rate",d.followerGrowthRate+"%",d.followerGrowthRateDelta," pts","","Instagram + TikTok organic only. Exclude paid follower campaigns.")}
+      ${metricCard("Net follower growth",d.netFollowerGrowth.toLocaleString(),null,"","","Followers gained minus lost for the calendar month.")}
+      ${metricCard("Organic reach",d.reach.toLocaleString()+"K",null,"","","Instagram + TikTok — accounts reached by organic posts only.")}
+      ${metricCard("Engagement rate",d.engagementRate+"%",d.engagementRateDelta," pts","","(likes + comments + shares + saves) / organic reach × 100.")}
+    </div>
+    <div class="note-box">Platforms: Instagram (Meta Business Suite) and TikTok Studio. Organic data only.</div>
+  </div>`;
+}
+
+function renderCompetitive(d) {
+  const brands = [
+    {name:"Kurt Geiger",idx:d.kgTrends,vol:d.kgVol,client:true},
+    {name:"Steve Madden",idx:d.smTrends,vol:d.smVol,client:false},
+    {name:"Carvela",idx:d.carTrends,vol:d.carVol,client:false},
+    {name:"Ted Baker",idx:d.tedTrends,vol:d.tedVol,client:false}
+  ].sort((a,b)=>b.idx-a.idx);
+  const rows = brands.map((br,i)=>`<div style="padding:10px 0;border-bottom:0.5px solid rgba(171,171,171,.12)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+      <div style="display:flex;align-items:center;gap:7px"><span style="font-size:10px;color:#ABABAB;width:14px">#${i+1}</span><span style="font-size:13px;font-weight:${br.client?700:400};color:${br.client?B.purple:B.nearBlack}">${br.name}</span></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.idx}</span><span style="font-size:10px;color:#ABABAB">/100</span>
+        <span style="font-size:11px;color:#ABABAB;min-width:50px;text-align:right">${br.vol}K</span>
+      </div>
+    </div>
+    <div class="comp-bar-wrap"><div style="height:100%;width:${(br.idx/70)*100}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
+  </div>`).join("");
+  return `<div>
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      <div style="flex:1">
+        <div class="label" style="margin-bottom:3px">Trends index (primary ranking)</div>
+        <div style="font-size:10px;color:#ABABAB;margin-bottom:10px">Est. monthly search volume (secondary) <span style="padding:1px 6px;background:#F5F5F5;border:0.5px solid rgba(171,171,171,.4);border-radius:3px;font-size:9px">SEMrush estimate</span></div>
+        ${rows}
+      </div>
+      <div style="width:160px;background:#F5F5F5;border-radius:8px;padding:12px 14px;flex-shrink:0">
+        <div class="label" style="margin-bottom:6px">Share of branded search</div>
+        <div style="font-size:24px;font-weight:700;color:#7756FF">${d.brandShare}%</div>
+        ${delta(d.brandShareDelta," pts")}
+        <div style="font-size:10px;color:#ABABAB;margin-top:6px">SEMrush est. vol. / sum all 4 brands</div>
+      </div>
+    </div>
+    <div class="note-box" style="margin-top:12px">Competitors set at onboarding, held constant. Trends data from a single comparative query — all scores use the same baseline. SEMrush volumes are modeled estimates.</div>
+  </div>`;
+}
+
+function renderCategory(d, idx) {
+  const gap = d.kgTrends - d.catTrends;
+  const prev = idx>0?RAW[idx-1]:null;
+  const catD = prev?d.catTrends-prev.catTrends:null;
+  const gapD = prev?(gap-(prev.kgTrends-prev.catTrends)):null;
+  const W=580,H=130,pad={l:28,r:8,t:10,b:22},minV=35,maxV=75,n=RAW.length;
+  const xp=i=>pad.l+(i/(n-1))*(W-pad.l-pad.r);
+  const yp=v=>pad.t+(1-(v-minV)/(maxV-minV))*(H-pad.t-pad.b);
+  const labels=RAW.map((m,i)=>`<text x="${xp(i)}" y="${H-4}" font-size="8" fill="${i===idx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===idx?700:400}">${MONTHS[i]}</text>`).join("");
+  const catChart = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
+    ${[40,50,60,70].map(v=>`<line x1="${pad.l}" y1="${yp(v)}" x2="${W-pad.r}" y2="${yp(v)}" stroke="${B.gray}" stroke-width="0.5" opacity="0.2"/><text x="${pad.l-4}" y="${yp(v)+3}" font-size="8" fill="${B.gray}" text-anchor="end" font-family="'Darker Grotesque',Arial,sans-serif">${v}</text>`).join("")}
+    <polyline points="${CAT_TRENDS3.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ")}" fill="none" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="2,4"/>
+    <polyline points="${CAT_TRENDS2.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ")}" fill="none" stroke="${B.lightPurple}" stroke-width="1" stroke-dasharray="2,3"/>
+    <polyline points="${RAW.map((m,i)=>`${xp(i).toFixed(1)},${yp(m.catTrends).toFixed(1)}`).join(" ")}" fill="none" stroke="${B.gray}" stroke-width="1.5" stroke-dasharray="3,3"/>
+    <polyline points="${RAW.map((m,i)=>`${xp(i).toFixed(1)},${yp(m.kgTrends).toFixed(1)}`).join(" ")}" fill="none" stroke="${B.purple}" stroke-width="2.5"/>
+    <circle cx="${xp(idx)}" cy="${yp(RAW[idx].kgTrends)}" r="4" fill="${B.purple}"/>
+    <circle cx="${xp(idx)}" cy="${yp(RAW[idx].catTrends)}" r="3" fill="${B.gray}"/>
+    ${labels}
+  </svg>`;
+  return `<div>
+    <div class="grid3" style="margin-bottom:14px">
+      ${metricCard(`Trends index — "women's shoes"`,d.catTrends+"/100",catD," pts")}
+      ${metricCard("Brand vs. category gap",(gap>0?"+":"")+gap+" pts",gapD," pts")}
+      ${metricCard("Category keyword volume",d.catVol.toLocaleString()+"K",d.catVolDelta,"%")}
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;margin-bottom:2px">Brand vs. category — Google Trends Export 2</div>
+      <div style="font-size:10px;color:#ABABAB;margin-bottom:10px">Kurt Geiger index vs. category terms</div>
+      ${catChart}
+      <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:8px">
+        ${[{color:B.purple,bold:true,label:`Kurt Geiger (${d.kgTrends})`},{color:B.gray,bold:false,label:`"women's shoes" (${d.catTrends})`},{color:B.lightPurple,bold:false,label:`"luxury footwear" (${CAT_TRENDS2[idx]})`},{color:"#B4B2A9",bold:false,label:`"designer shoes" (${CAT_TRENDS3[idx]})`}].map(l=>`<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#ABABAB">
+          <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="${l.color}" stroke-width="${l.bold?2.5:1.5}" stroke-dasharray="${l.bold?"none":"3,3"}"/></svg>
+          <span style="font-weight:${l.bold?700:400};color:${l.bold?B.nearBlack:B.gray}">${l.label}</span>
+        </div>`).join("")}
+      </div>
+    </div>
+    <div style="background:${d.risingTide?"rgba(250,199,117,.12)":"rgba(225,245,238,.2)"};border:0.5px solid ${d.risingTide?"rgba(250,199,117,.5)":"rgba(93,202,165,.5)"};border-radius:8px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:700;margin-bottom:4px">${d.risingTide?"Rising-tide pattern detected this month":"No rising-tide pattern this month"}</div>
+      <div style="font-size:12px;color:#ABABAB;line-height:1.6">${d.risingTide?`The "women's shoes" Trends index rose this month while brand metrics moved in the same direction. Some BVI movement reflects broader category momentum. Brand-vs-category gap ${gap>0?"remains positive at +"+gap+" pts":"has narrowed to "+gap+" pts"}.`:`The "women's shoes" index moved independently of brand metrics. BVI changes are primarily brand-driven. Brand outperforming category by ${gap} pts.`}</div>
+    </div>
+  </div>`;
+}
+
+function renderListening(d) {
+  if(!d.mentionVol) return `<div style="padding:32px 0;text-align:center"><div style="font-size:14px;font-weight:600;color:#ABABAB;margin-bottom:6px">No listening data for this period</div><div style="font-size:12px;color:#ABABAB;line-height:1.6">Meltwater listening only captures from the date the query is configured.</div></div>`;
+  const sentBrands=[{name:"Kurt Geiger",pct:d.kgSentiment,client:true},{name:"Steve Madden",pct:d.smSentiment,client:false},{name:"Carvela",pct:d.carSentiment,client:false},{name:"Ted Baker",pct:d.tedSentiment,client:false}].sort((a,b)=>b.pct-a.pct);
+  return `<div>
+    <div class="grid4" style="margin-bottom:14px">
+      ${metricCard("Mention volume",d.mentionVol.toLocaleString(),d.mentionVolDelta,"%")}
+      ${metricCard("Positive sentiment",d.kgSentiment+"%",d.sentimentDelta," pts")}
+      ${metricCard("Share of voice",d.sov+"%",d.sovDelta," pts")}
+      ${metricCard("Earned reach",d.earnedReach.toLocaleString()+"K",null)}
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;margin-bottom:2px">Competitive sentiment</div>
+      <div style="font-size:10px;color:#ABABAB;margin-bottom:12px">% positive mentions — Meltwater competitive query</div>
+      ${sentBrands.map((br,i)=>`<div style="padding:9px 0;border-bottom:${i<3?"0.5px solid rgba(171,171,171,.12)":"none"}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <div style="display:flex;align-items:center;gap:7px"><span style="font-size:10px;color:#ABABAB;width:14px">#${i+1}</span><span style="font-size:13px;font-weight:${br.client?700:400};color:${br.client?B.purple:B.nearBlack}">${br.name}</span></div>
+          <span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.pct}%</span>
+        </div>
+        <div class="comp-bar-wrap"><div style="height:100%;width:${br.pct}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
+      </div>`).join("")}
+    </div>
+    <div class="grid2">
+      ${metricCard("Influencer est. reach",d.influencerReach.toLocaleString()+"K",null,"","","Meltwater-modeled estimate.","Estimated · Meltwater model")}
+      ${metricCard("Earned media value","$"+d.emv+"K",null,"","","Meltwater EMV methodology — modeled estimate.","Modelled estimate · Meltwater")}
+    </div>
+  </div>`;
+}
+
+function renderPaid(d) {
+  if(!d.brandedCpmGoogle) return `<div style="padding:32px 0;text-align:center"><div style="font-size:14px;font-weight:600;color:#ABABAB;margin-bottom:6px">No paid data for this period</div><div style="font-size:12px;color:#ABABAB">Paid Brand Efficiency data begins January 2026.</div></div>`;
+  return `<div class="grid2">
+    ${metricCard("Branded CPM — Google","$"+d.brandedCpmGoogle,d.cpmGoogleDelta,"%",true,"Lower CPM = more efficient branded spend.")}
+    ${metricCard("Branded CPM — Meta","$"+d.brandedCpmMeta,d.cpmMetaDelta,"%",true,"Lower CPM = more efficient branded spend.")}
+    ${metricCard("Search impression share",d.impressionShare+"%",d.impressionShareDelta," pts")}
+    ${metricCard("Branded paid CTR",d.paidCtr+"%",d.paidCtrDelta," pts")}
+  </div>`;
+}
+
+function renderAwareness(idx) {
+  const survey = getSurvey(idx);
+  const prevSurvey = survey ? SURVEYS[SURVEYS.indexOf(survey)-1] : null;
+  if(!survey) return `<div style="padding:32px 0;text-align:center"><div style="font-size:14px;font-weight:600;color:#ABABAB;margin-bottom:6px">No survey data yet</div><div style="font-size:12px;color:#ABABAB;line-height:1.6">Direct Awareness survey data begins with the first PDM-executed survey.</div></div>`;
+  const staleness = getStaleness(survey.monthIdx, idx);
+  const stalCfg = {fresh:{bg:B.greenBg,color:B.green,text:`Survey data · ${survey.date}`},amber:{bg:B.amberBg,color:B.amber,text:`Survey from ${survey.date} · refresh recommended`},stale:{bg:B.redBg,color:B.red,text:`Survey from ${survey.date} · overdue`}}[staleness];
+  const metrics=[
+    {label:"Unaided recall",val:survey.unaidedRecall,prev:prevSurvey?.unaidedRecall,note:"Q1: Name any footwear brands you can think of"},
+    {label:"Aided awareness",val:survey.aidedAwareness,prev:prevSurvey?.aidedAwareness,note:"Q2: Recognition list shown to respondents"},
+    {label:"Consideration",val:survey.consideration,prev:prevSurvey?.consideration,note:"Q3: Would you consider buying from this brand?"},
+    {label:"Preference",val:survey.preference,prev:prevSurvey?.preference,note:"Q4: Which brand would be your first choice?"},
+  ];
+  return `<div>
+    <div style="background:#F5F5F5;border:0.5px solid rgba(171,171,171,.3);border-radius:8px;padding:12px 16px;margin-bottom:14px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:11px;font-weight:700;margin-bottom:6px">Survey metadata</div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px">
+            ${[{l:"Source",v:"PDM Survey (Pollfish)"},{l:"Fielded",v:survey.fieldingDate},{l:"Sample",v:"n="+survey.sampleSize.toLocaleString()},{l:"Audience",v:survey.audienceType}].map(m=>`<div><div class="label">${m.l}</div><div style="font-size:12px;font-weight:600">${m.v}</div></div>`).join("")}
+          </div>
+        </div>
+        <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:${stalCfg.bg};color:${stalCfg.color};font-weight:600">${stalCfg.text}</span>
+      </div>
+    </div>
+    <div class="grid4" style="margin-bottom:14px">
+      ${metrics.map(m=>{
+        const d2 = m.prev!=null ? m.val-m.prev : null;
+        return `<div class="card">
+          <div class="label" style="margin-bottom:5px">${m.label}</div>
+          <div style="font-size:28px;font-weight:700;line-height:1">${m.val}%</div>
+          <div style="margin-top:5px">${d2!=null?delta(d2," pts")+"<span style='font-size:10px;color:#ABABAB;margin-left:6px'>vs prior survey</span>":`<span style="font-size:10px;color:#ABABAB">First survey</span>`}</div>
+          <div style="font-size:10px;color:#ABABAB;margin-top:6px;font-style:italic">${m.note}</div>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;margin-bottom:12px">Awareness funnel</div>
+      ${metrics.map(m=>`<div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px">${m.label}</span><span style="font-size:12px;font-weight:700">${m.val}%</span></div>
+        <div style="height:8px;background:rgba(171,171,171,.2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${m.val}%;background:#7756FF;border-radius:4px"></div></div>
+      </div>`).join("")}
+      <div style="font-size:11px;color:#ABABAB;margin-top:8px">Each stage = % of cold/prospective audience. Conversion from aided awareness (${survey.aidedAwareness}%) to consideration (${survey.consideration}%) is the key efficiency metric.</div>
+    </div>
+  </div>`;
+}
+
+// ── MODAL DATA ────────────────────────────────────────────────────────────────
+const DIM_SPEC = {
+  search:{name:"Search Demand",weight:"22% of BVI",sources:["Google Search Console (ZIP) — Chart.csv + Queries.csv","Google Trends Export 1 — brand vs. competitors"],principle:"All signals score on trend direction and rate of change, never on absolute values. A brand with 10K impressions growing 15% MoM scores identically to one with 2M impressions growing 15% MoM.",signals:[{n:"Branded impressions MoM %",w:"35%",s:"Standard % change",note:"How often your brand name appears in Google search results. Growing impressions mean more people are actively searching for your brand — one of the earliest and most reliable signals that awareness is expanding."},{n:"Branded clicks MoM %",w:"25%",s:"Standard % change",note:"How often searchers click through after seeing a branded result. Growing clicks on top of growing impressions confirms awareness is converting into active interest, not just passive exposure."},{n:"Google Trends index MoM %",w:"25%",s:"Standard % change",note:"Measures relative search interest in your brand over time, indexed to 100 at peak. A rising Trends index means more people are proactively seeking your brand — genuine curiosity, not ad-driven traffic."},{n:"Average position MoM change",w:"15%",s:"Position change (inverse)",note:"Your average ranking when someone searches for your brand. Improving position means you appear higher more often, reinforcing name recognition and increasing the likelihood of a click with every future search."}],flags:["Rising tide modifier: ×0.90 on Trends signal if category growing alongside brand.","Large swing cap: any signal change >±40% is capped at the ±40% score value. Raw value still displayed."]},
+  digital:{name:"Digital Presence",weight:"22% of BVI",sources:["GA4 Traffic Acquisition CSV — monthly date dimension"],principle:"Direct traffic share is the primary signal — it is size-agnostic and the clearest proxy for brand recall. Someone typing your URL knew you before they needed to search.",signals:[{n:"Direct sessions MoM %",w:"30%",s:"Standard % change",note:"Visitors who typed your URL directly or used a saved bookmark — they already knew your brand before the visit. Growing direct traffic is one of the clearest proof points that awareness is translating into habitual, ad-free behavior."},{n:"Direct % of total sessions MoM change",w:"40%",s:"Percentage point change",note:"The share of all traffic that arrived directly, not through ads or search. Growing share means more people recall your brand without a prompt. Weighted highest because it is size-independent — a 2-point share gain at 10K sessions shows stronger awareness momentum than flat share at 1M sessions."},{n:"Organic Search sessions MoM %",w:"30%",s:"Standard % change",note:"Visitors who found you through unpaid search results. Organic growth without paid support signals genuine brand interest — people are searching for terms that lead to you, not just responding to a campaign."}],flags:["If GA4 not uploaded: dimension excluded entirely from BVI."]},
+  social:{name:"Organic Social",weight:"14% of BVI",sources:["Instagram — manual entry via Meta Business Suite","TikTok — manual entry via TikTok Studio"],principle:"Engagement rate is weighted highest because reach and follower counts can be inflated by viral one-off content. Sustained engagement reflects genuine audience health.",signals:[{n:"Engagement rate MoM change",w:"45%",s:"Percentage point change",note:"The percentage of people who saw your posts and actively responded — liked, commented, shared, or saved. Engagement reflects audience quality over quantity: a brand whose content consistently earns reactions has built a real community, not just a count."},{n:"Follower growth rate MoM %",w:"30%",s:"Standard % change",note:"How quickly your audience is growing month over month, measured as a rate rather than raw count. Rate-based measurement is size-agnostic — 2% monthly growth signals the same momentum whether you have 10K or 1M followers."},{n:"Organic reach MoM %",w:"25%",s:"Standard % change",note:"The number of unique accounts who saw your unpaid posts. Growing organic reach means the platform is distributing your content more broadly — a sign your brand earns exposure through genuine engagement rather than paid amplification."}],flags:["If both platforms entered: signals averaged before scoring.","If one platform only: scored on that platform with SINGLE_PLATFORM_SOCIAL flag.","90-day native platform limit — data prior to ~3 months unavailable."]},
+  competitive:{name:"Competitive Position",weight:"14% of BVI",sources:["Google Trends Export 1 — single comparative query with all brands"],principle:"Never score on absolute Trends index value. Score on share, share change, and gap change. A brand ranked #3 but improving rapidly is healthier than one ranked #1 but declining.",signals:[{n:"Brand Trends share MoM change",w:"50%",s:"Percentage point change",note:"Your share of total search interest across all tracked brands in the category. When your share grows, consumers are shifting attention toward your brand relative to competitors — even in a flat market, share gains prove your brand is winning mindshare."},{n:"Gap to nearest competitor MoM change",w:"30%",s:"Percentage point change",note:"The distance between your Trends index and the closest competitor's. A widening gap means you are pulling ahead of your nearest challenger. A narrowing gap is an early warning that a competitor may be accelerating spend or gaining cultural relevance."},{n:"Brand Trends index MoM %",w:"20%",s:"Standard % change",note:"Your brand's absolute search interest level, used to confirm whether share gains reflect real growth or simply competitor decline. Share gains backed by a rising index confirm genuine momentum; share gains while your own index falls deserve closer review."}],flags:["Ordinal rank (#1, #2, etc.) is display context only — does not affect dimension score.","If Trends Export 1 not uploaded: dimension excluded entirely."]},
+  category:{name:"Category Context",weight:"8% of BVI",sources:["Google Trends Export 2 — separate query: brand vs. category terms","SEMrush — category keyword volume (display only, not scored)"],principle:"Measures whether brand growth is brand-driven or riding a category-wide wave. Produces the Rising Tide flag that modifies Search Demand and Competitive Position scoring.",signals:[{n:"Brand vs. primary category term gap MoM change",w:"60%",s:"Percentage point change",note:"The difference between your brand's search interest and the primary category keyword's. A widening positive gap means your brand is growing faster than the category itself — people are searching specifically for you, not just for the product type. This is the core signal of brand-led growth."},{n:"Brand Trends index MoM %",w:"40%",s:"Standard % change",note:"Your brand's search interest from the category comparison query, used to determine whether growth is brand-driven or market-wide. When your index rises while the category stays flat, growth belongs to your brand; when both rise together, the Rising Tide flag activates and category-influenced signals are discounted."}],flags:["Rising tide = TRUE when brand and primary category move same direction AND category moves ≥50% as much as brand.","Rising tide modifier: ×0.90 on this dimension's final score.","Small brand handling (index 0-2): score A on absolute value instead of gap method.","SEMrush volume is display context only — not a scored signal in v1."]},
+  listening:{name:"Social Listening",weight:"10% of BVI (Silver tier)",sources:["Meltwater — earned media analytics and competitive SOV report"],principle:"Volume and sentiment together tell the real story. Volume growing while sentiment declines is a Watch signal — audience is talking but not positively.",signals:[{n:"Mention volume MoM %",w:"35%",s:"Standard % change",note:"Total earned mentions for the calendar month."},{n:"Positive sentiment % MoM change",w:"35%",s:"Percentage point change",note:"Meltwater sentiment analysis: positive mentions / total mentions × 100."},{n:"Share of voice MoM change",w:"20%",s:"Percentage point change",note:"Brand mentions / total category mentions × 100."},{n:"Earned reach MoM %",w:"10%",s:"Standard % change",note:"Meltwater-modeled estimate."}],flags:["Meltwater only captures from the date the query is configured — no historical backfill.","EMV is display-only — not a scored signal."]},
+  paid:{name:"Paid Brand Efficiency",weight:"5% of BVI (Silver tier)",sources:["Google Ads — branded campaign CPM and impression share","Meta Ads — branded campaign CPM"],principle:"Rising branded CPM signals either increased demand (positive) or competitor bidding pressure (watch). Impression share distinguishes between the two.",signals:[{n:"Branded CPM Google Ads MoM change",w:"35%",s:"Percentage point change (inverse)",note:"Lower CPM = more efficient. Inverse scoring."},{n:"Branded CPM Meta Ads MoM change",w:"25%",s:"Percentage point change (inverse)",note:"Same inverse logic."},{n:"Search impression share MoM change",w:"25%",s:"Percentage point change",note:"% of eligible impressions your branded ads received."},{n:"Branded paid CTR MoM change",w:"15%",s:"Percentage point change",note:""}],flags:["Rising CPM + falling impression share = competitor bidding pressure.","Rising CPM + rising impression share = genuine branded demand increase."]},
+  awareness:{name:"Direct Awareness",weight:"5% of BVI (Gold tier)",sources:["PDM Survey via Pollfish — quarterly execution"],principle:"The only BVI dimension that directly measures whether people know your brand. Survey data moves slowly and should be interpreted across multiple quarters, not month-to-month.",signals:[{n:"Unaided recall change",w:"40%",s:"Percentage point change",note:"% of cold/prospective audience naming brand unprompted."},{n:"Aided awareness change",w:"25%",s:"Percentage point change",note:"% selecting brand from a recognition list."},{n:"Consideration change",w:"20%",s:"Percentage point change",note:"% who would consider purchasing."},{n:"Preference change",w:"15%",s:"Percentage point change",note:"% selecting brand as first choice in category."}],flags:["Survey is quarterly — carry-forward applies in non-survey months.","Sample size is context only — does not affect BVI score.","Never compare cold/prospective audience recall to existing customer recall."]}
+};
+
+const SCALES = [
+  {name:"Standard MoM % Change",used:"Impressions, clicks, sessions, reach, views, follower growth",rows:[{r:"+15%+",s:"92"},{r:"+8-15%",s:"80-92"},{r:"+3-8%",s:"68-80"},{r:"0-3%",s:"57-68"},{r:"-3-0%",s:"46-57"},{r:"-8--3%",s:"35-46"},{r:"-15--8%",s:"24-35"},{r:"<-15%",s:"14"}]},
+  {name:"Percentage Point Change",used:"Direct % of sessions, engagement rate",rows:[{r:"+2.0pts+",s:"92"},{r:"+1.0-2.0pts",s:"78-92"},{r:"+0.3-1.0pts",s:"64-78"},{r:"-0.3-+0.3pts",s:"52-64"},{r:"-1.0--0.3pts",s:"40-52"},{r:"-2.0--1.0pts",s:"28-40"},{r:"<-2.0pts",s:"16"}]},
+  {name:"Position Change (inverse)",used:"Average search position",rows:[{r:"Improved 1.0+",s:"92"},{r:"Improved 0.5-1.0",s:"80"},{r:"Improved 0.1-0.5",s:"66"},{r:"Flat",s:"54"},{r:"Declined 0.1-0.5",s:"42"},{r:"Declined 0.5-1.0",s:"30"},{r:"Declined 1.0+",s:"18"}]}
+];
+
+// ── MODAL ─────────────────────────────────────────────────────────────────────
+function openModal(dimId) {
+  const spec = DIM_SPEC[dimId];
+  if(!spec) return;
+  document.getElementById("modal-title").textContent = spec.name;
+  document.getElementById("modal-weight").textContent = spec.weight;
+  document.getElementById("modal-body").innerHTML = `
+    <div style="margin-bottom:16px">
+      <div class="label" style="margin-bottom:6px">Data sources</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${spec.sources.map(s=>`<span class="signal-tag">${s}</span>`).join("")}</div>
+    </div>
+    <div class="card" style="border-left:3px solid #7756FF;margin-bottom:16px">
+      <div class="label" style="color:#7756FF;margin-bottom:5px">Core principle</div>
+      <div style="font-size:12px;line-height:1.6">${spec.principle}</div>
+    </div>
+    <div style="margin-bottom:16px">
+      <div class="label" style="margin-bottom:8px">Signal weights</div>
+      ${spec.signals.map(sig=>`<div style="border-bottom:0.5px solid rgba(171,171,171,.2);padding:10px 0">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:${sig.note?4:0}px">
+          <div style="flex:1"><span style="font-size:12px;font-weight:600">${sig.n}</span><span style="font-size:10px;color:#ABABAB;margin-left:8px">Scale: ${sig.s}</span></div>
+          <span style="font-size:13px;font-weight:700;color:#7756FF;flex-shrink:0;margin-left:12px">${sig.w}</span>
+        </div>
+        ${sig.note?`<div style="font-size:11px;color:#ABABAB;line-height:1.5">${sig.note}</div>`:""}
+      </div>`).join("")}
+    </div>
+    ${spec.flags&&spec.flags.length?`<div style="margin-bottom:16px">
+      <div class="label" style="margin-bottom:6px">Flags and edge cases</div>
+      ${spec.flags.map(f=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:0.5px solid rgba(171,171,171,.15)"><span style="color:#BA7517;font-weight:700;flex-shrink:0">⚑</span><span style="font-size:11px;line-height:1.5">${f}</span></div>`).join("")}
+    </div>`:""}
+    <div>
+      <div class="label" style="margin-bottom:8px">Scoring scales reference</div>
+      <div class="grid3">
+        ${SCALES.map(sc=>`<div class="card" style="padding:10px 12px">
+          <div style="font-size:10px;font-weight:700;margin-bottom:2px">${sc.name}</div>
+          <div style="font-size:9px;color:#ABABAB;margin-bottom:8px;line-height:1.4">${sc.used}</div>
+          ${sc.rows.map(r=>`<div class="scale-row"><span style="font-size:10px;color:#ABABAB">${r.r}</span><span style="font-size:10px;font-weight:700;color:#7756FF">${r.s}</span></div>`).join("")}
+          <div style="margin-top:6px;font-size:9px;color:#ABABAB;opacity:.7">Interpolates linearly within bands. First month: all signals score 55.</div>
+        </div>`).join("")}
+      </div>
+    </div>
+  `;
+  document.getElementById("modal").classList.remove("hidden");
+}
+function closeModal() { document.getElementById("modal").classList.add("hidden"); }
+document.getElementById("modal").addEventListener("click", e=>{ if(e.target===e.currentTarget) closeModal(); });
+
+// ── TOGGLE DIM ROW ────────────────────────────────────────────────────────────
+function toggleDim(dimId) {
+  state.expandedDims[dimId] = !state.expandedDims[dimId];
+  render();
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────────────────────
+function setIdx(i) { state.idx = Math.max(0, Math.min(RAW.length-1, i)); render(); }
+function setTier(t) { state.tier = t; render(); }
+function setTab(t) { state.tab = t; render(); }
+
+// ── MAIN RENDER ───────────────────────────────────────────────────────────────
+function render() {
+  const {idx, tier, tab} = state;
+  const d = RAW[idx], prev = idx>0?RAW[idx-1]:null;
+  const isBackfill = d.status === "backfill";
+  const bviDelta = prev ? d.bvi - prev.bvi : null;
+  const isSilver = tier==="silver"||tier==="gold";
+  const isGold = tier==="gold";
+
+  const TABS = [
+    {id:"search",label:"Search demand"},
+    {id:"digital",label:"Digital presence"},
+    {id:"social",label:"Organic social"},
+    {id:"competitive",label:"Competitive position"},
+    {id:"category",label:"Category context"},
+    ...(isSilver?[{id:"listening",label:"Social listening"}]:[]),
+    ...(isSilver?[{id:"paid",label:"Paid brand efficiency"}]:[]),
+    ...(isGold?[{id:"awareness",label:"Direct awareness"}]:[]),
+    {id:"methodology",label:"Why this matters"},
+  ];
+
+  const activeTab = TABS.find(t=>t.id===tab) ? tab : "search";
+  const tierLabel = isGold?"Gold":isSilver?"Silver":"Bronze";
+
+  // Adjusted BVI for tier
+  const adjBVI = isGold?Math.min(100,d.bvi+3):isSilver?Math.min(100,d.bvi+1):d.bvi;
+
+  // ── TAB CONTENT
+  let tabContent = "";
+  if(activeTab==="search") tabContent = renderSearch(d);
+  else if(activeTab==="digital") tabContent = renderDigital(d);
+  else if(activeTab==="social") tabContent = renderSocial(d);
+  else if(activeTab==="competitive") tabContent = renderCompetitive(d);
+  else if(activeTab==="category") tabContent = renderCategory(d, idx);
+  else if(activeTab==="listening") tabContent = renderListening(d);
+  else if(activeTab==="paid") tabContent = renderPaid(d);
+  else if(activeTab==="awareness") tabContent = renderAwareness(idx);
+  else if(activeTab==="methodology") tabContent = renderMethodology();
+
+  // ── DIM ROWS
+  const dims = `
+    ${dimRow("Search demand","search",d,prev,"base",false)}
+    ${dimRow("Digital presence","digital",d,prev,"base",false)}
+    ${dimRow("Organic social","social",d,prev,"base",!d.followerGrowthRate)}
+    ${dimRow("Competitive position","competitive",d,prev,"base",false)}
+    ${isSilver?dimRow("Paid brand efficiency","paid",d,prev,"silver",!d.brandedCpmGoogle):dimRow("Paid brand efficiency",null,d,prev,"silver",true)}
+    ${isGold?dimRow("Direct awareness","awareness",d,prev,"gold",false):dimRow("Direct awareness",null,d,prev,"gold",true)}
+  `;
+
+  // ── COMPETITIVE PANEL
+  const brands = [
+    {name:"Kurt Geiger",idx:d.kgTrends,vol:d.kgVol,client:true},
+    {name:"Steve Madden",idx:d.smTrends,vol:d.smVol,client:false},
+    {name:"Carvela",idx:d.carTrends,vol:d.carVol,client:false},
+    {name:"Ted Baker",idx:d.tedTrends,vol:d.tedVol,client:false}
+  ].sort((a,b)=>b.idx-a.idx);
+
+  const compRows = brands.map((br,i)=>`<div style="padding:9px 0;border-bottom:${i<3?"0.5px solid rgba(171,171,171,.12)":"none"}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+      <div style="display:flex;align-items:center;gap:7px"><span style="font-size:10px;color:#ABABAB;width:14px">#${i+1}</span><span style="font-size:13px;font-weight:${br.client?700:400};color:${br.client?B.purple:B.nearBlack}">${br.name}</span></div>
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.idx}</span><span style="font-size:10px;color:#ABABAB">/100</span><span style="font-size:11px;color:#ABABAB;min-width:48px;text-align:right">${br.vol}K</span></div>
+    </div>
+    <div class="comp-bar-wrap"><div style="height:100%;width:${(br.idx/70)*100}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
+  </div>`).join("");
+
+  // ── TIER BUTTONS
+  const tierBtns = ["bronze","silver","gold"].map(t=>{
+    const active = tier===t;
+    const bg = t==="bronze"?"#FAC775":t==="silver"?B.lightPurple:B.yellow;
+    const c = t==="bronze"?"#633806":t==="silver"?"#26215C":B.nearBlack;
+    return `<button class="tier-btn${active?" active":""}" onclick="setTier('${t}')" style="${active?`background:${bg};color:${c};`:""}">${t.charAt(0).toUpperCase()+t.slice(1)}</button>`;
+  }).join("");
+
+  document.getElementById("app").innerHTML = `
+    <!-- DEMO BANNER -->
+    <div style="background:#E3FF43;border-radius:6px;padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;font-weight:700;color:#2B2A29;text-transform:uppercase;letter-spacing:.07em">Prototype Demo Mode</span>
+        <span style="font-size:11px;color:#2B2A29;opacity:.7">All tiers unlocked · Kurt Geiger dummy data · Click any dimension row to explore scoring methodology</span>
+      </div>
+      <span style="font-size:10px;font-weight:700;color:#2B2A29;opacity:.6">Power Digital Marketing — Internal only</span>
+    </div>
+
+    <!-- HEADER -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+      <div>
+        <div class="label" style="margin-bottom:2px">Brand Velocity Index · Fashion Vertical</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="font-size:20px;font-weight:700">Kurt Geiger London</div>
+          <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:#E3FF43;color:#2B2A29;font-weight:700">Demo</span>
+        </div>
+        <div style="font-size:11px;color:#ABABAB">Power Digital Marketing · Monthly brand health report · All tiers unlocked</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="display:flex;align-items:center;gap:6px;background:#fff;border:0.5px solid rgba(171,171,171,.3);border-radius:8px;padding:4px 6px">
+          <span style="font-size:10px;color:#ABABAB;font-weight:600;margin-right:2px">TIER</span>
+          <span style="font-size:9px;padding:1px 6px;border-radius:3px;background:#E3FF43;color:#2B2A29;font-weight:700;margin-right:4px">Demo</span>
+          ${tierBtns}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button onclick="setIdx(${idx-1})" ${idx===0?"disabled":""} style="width:28px;height:28px;border-radius:6px;border:0.5px solid rgba(171,171,171,.4);background:transparent;font-size:15px;${idx===0?"opacity:.4":""}">&#8249;</button>
+          <div style="text-align:center;min-width:76px">
+            <div style="font-size:14px;font-weight:700">${MONTHS[idx]}</div>
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${isBackfill?"#BA7517":"#0F6E56"}">${isBackfill?"Backfill":"Live"}</div>
+          </div>
+          <button onclick="setIdx(${idx+1})" ${idx===RAW.length-1?"disabled":""} style="width:28px;height:28px;border-radius:6px;border:0.5px solid rgba(171,171,171,.4);background:transparent;font-size:15px;${idx===RAW.length-1?"opacity:.4":""}">&#8250;</button>
+        </div>
+      </div>
+    </div>
+
+    ${isBackfill?`<div style="background:rgba(250,199,117,.12);border:0.5px solid #FAC775;border-radius:6px;padding:7px 14px;margin-bottom:14px;font-size:11px;color:#633806"><strong>Backfill month</strong> — Base tier signals only. Organic Social unavailable prior to January 2026 (90-day native platform limit).</div>`:""}
+
+    <!-- SCORE + SUMMARY -->
+    <div style="display:grid;grid-template-columns:180px 1fr;gap:12px;margin-bottom:12px">
+      <div class="purple-card" style="display:flex;flex-direction:column;justify-content:space-between">
+        <div>
+          <div class="label" style="color:#AFAAF9;margin-bottom:4px">BVI Score</div>
+          <div style="font-size:58px;font-weight:700;color:#F5F5F5;line-height:1">${adjBVI}</div>
+          <div style="font-size:11px;color:#AFAAF9;margin-bottom:10px">out of 100</div>
+          ${bviDelta!=null?`<div style="font-size:13px;font-weight:700;color:${bviDelta>0?"#CDF8FF":bviDelta<0?"#FFBAFB":"#AFAAF9"};margin-bottom:8px">${bviDelta>0?"↑":bviDelta<0?"↓":"→"} ${Math.abs(bviDelta)} pts MoM</div>`:""}
+          <div style="display:inline-block;font-size:9px;padding:2px 8px;border-radius:3px;background:${isBackfill?"#FAC775":tierLabel==="Bronze"?"#FAC775":tierLabel==="Silver"?B.lightPurple:B.yellow};color:#2B2A29;font-weight:700">${tierLabel} confidence</div>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid rgba(175,170,249,.25)">
+          ${sparklineSVG(144,44,idx)}
+          <div style="display:flex;gap:10px;margin-top:4px">
+            <div style="display:flex;align-items:center;gap:3px;font-size:9px;color:#AFAAF9"><div style="width:10px;height:2px;background:#F5F5F5"></div> BVI</div>
+            <div style="display:flex;align-items:center;gap:3px;font-size:9px;color:#AFAAF9"><div style="width:10px;height:2px;background:#AFAAF9;opacity:.6"></div> Cat.</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1">
+          ${[
+            {label:"What moved",text:d.whatMoved,color:B.purple},
+            {label:"Why it moved",text:d.whyItMoved,color:B.nearBlack},
+            {label:"Category context",text:d.categoryContext,color:d.risingTide?"#BA7517":"#0F6E56",flag:d.risingTide},
+            {label:"Competitive shift",text:d.competitiveShift,color:B.nearBlack}
+          ].map(q=>`<div class="card" style="border-left:3px solid ${q.color}">
+            <div class="label" style="color:${q.color};margin-bottom:5px;display:flex;align-items:center;gap:4px">${q.label}${q.flag?`<span style="font-size:8px;padding:1px 5px;border-radius:3px;background:#FAC775;color:#633806">Rising tide</span>`:""}</div>
+            <div style="font-size:12px;line-height:1.55">${q.text}</div>
+          </div>`).join("")}
+        </div>
+        <div class="dark-card">
+          <span class="label" style="color:#E3FF43;margin-right:10px">Recommendation</span>
+          <span style="font-size:12px;color:#F5F5F5;line-height:1.55">${d.recommendation}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- TREND CHART -->
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700">12-month BVI trend</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap">
+          ${[{color:B.purple,dash:false,label:"BVI — live"},{color:B.lightPurple,dash:true,label:"BVI — backfill"},{color:B.gray,dash:true,label:`Category`}].map(l=>`<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#ABABAB"><svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="${l.color}" stroke-width="1.5" stroke-dasharray="${l.dash?"3,3":"none"}"/></svg>${l.label}</div>`).join("")}
+          ${d.risingTide?`<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#BA7517"><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="#E3FF43" stroke-width="1.5"/></svg>Rising tide</div>`:""}
+        </div>
+      </div>
+      ${trendChartSVG(idx)}
+    </div>
+
+    <!-- SIGNAL STATUS + COMPETITIVE -->
+    <div class="grid2" style="margin-bottom:12px">
+      <div class="card">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">Signal status</div>
+        <div style="font-size:10px;color:#ABABAB;margin-bottom:10px">Click any row to see contributing factors. Scoring spec accessible inside each expanded row.</div>
+        ${dims}
+      </div>
+      <div class="card">
+        <div style="font-size:12px;font-weight:700;margin-bottom:2px">Competitive position</div>
+        <div style="font-size:10px;color:#ABABAB;margin-bottom:10px">Google Trends index · Est. monthly search volume (SEMrush)</div>
+        ${compRows}
+      </div>
+    </div>
+
+    <!-- SIGNAL TABS -->
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+      <div style="display:flex;border-bottom:0.5px solid rgba(171,171,171,.15);overflow-x:auto">
+        ${TABS.map(t=>`<button class="tab-btn${activeTab===t.id?" active":""}" onclick="setTab('${t.id}')">${t.label}</button>`).join("")}
+      </div>
+      <div style="padding:16px 18px">${tabContent}</div>
+    </div>
+
+    <!-- UPSELL (only when not Gold) -->
+    ${!isGold?`<div>
+      <div class="label" style="margin-bottom:8px">Unlock additional signal dimensions</div>
+      <div style="display:grid;grid-template-columns:${isSilver?"1fr":"1fr 1fr 1fr"};gap:10px">
+        ${!isSilver?`<div style="border:1px solid rgba(175,170,249,.5);border-radius:8px;padding:14px 16px;background:rgba(175,170,249,.08)"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><span style="font-size:12px;font-weight:700">Social listening + influencer SOV</span><span style="font-size:9px;padding:2px 8px;border-radius:3px;background:#AFAAF9;color:#26215C;font-weight:700">Silver</span></div><p style="font-size:11px;color:#ABABAB;margin:0 0 10px;line-height:1.6">Mention volume, sentiment %, share of voice, earned reach, and EMV from Meltwater.</p><button onclick="setTier('silver')" style="font-size:11px;padding:5px 12px;border-radius:5px;border:0.5px solid #AFAAF9;background:transparent;color:#7756FF;font-weight:600">Preview Silver tier ↗</button></div>`:""}
+        ${!isSilver?`<div style="border:1px solid rgba(175,170,249,.5);border-radius:8px;padding:14px 16px;background:rgba(175,170,249,.08)"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><span style="font-size:12px;font-weight:700">Paid brand efficiency</span><span style="font-size:9px;padding:2px 8px;border-radius:3px;background:#AFAAF9;color:#26215C;font-weight:700">Silver</span></div><p style="font-size:11px;color:#ABABAB;margin:0 0 10px;line-height:1.6">Branded CPM trend across Google Ads and Meta, search impression share, and branded paid CTR.</p><button onclick="setTier('silver')" style="font-size:11px;padding:5px 12px;border-radius:5px;border:0.5px solid #AFAAF9;background:transparent;color:#7756FF;font-weight:600">Preview Silver tier ↗</button></div>`:""}
+        <div style="border:1px solid rgba(227,255,67,.4);border-radius:8px;padding:14px 16px;background:rgba(227,255,67,.06)"><div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px"><span style="font-size:12px;font-weight:700">Direct awareness survey</span><span style="font-size:9px;padding:2px 8px;border-radius:3px;background:#E3FF43;color:#2B2A29;font-weight:700">Gold</span></div><p style="font-size:11px;color:#ABABAB;margin:0 0 10px;line-height:1.6">The only dimension measuring unaided recall and aided awareness directly. PDM-executed quarterly survey via Pollfish.</p><button onclick="setTier('gold')" style="font-size:11px;padding:5px 12px;border-radius:5px;border:0.5px solid #E3FF43;background:transparent;color:#2B2A29;font-weight:600">Preview Gold tier ↗</button></div>
+      </div>
+    </div>`:""}
+  `;
+}
+
+function renderMethodology() {
+  return `<div>
+    <div class="dark-card" style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;color:#F5F5F5;margin-bottom:6px">Why brand measurement matters — and why it's hard</div>
+      <p style="font-size:12px;color:#ABABAB;line-height:1.65;margin-bottom:8px">Most marketing measurement is built to answer a 7-day question. Brand works on a 12-24 month timescale. The gap between those two clocks is why brand budgets get cut first and justified last.</p>
+      <p style="font-size:12px;color:#ABABAB;line-height:1.65">The data below is drawn from published third-party research: Google, Nielsen, Ekimetrics, Kantar, BCG, and McKinsey. The BVI tracks the signals these studies identify as leading indicators of brand health.</p>
+    </div>
+    <div class="grid4" style="margin-bottom:14px">
+      ${[{v:"45%",l:"of CFOs have declined or underfunded marketing proposals that didn't show a clear line to value",s:"McKinsey"},{v:"5-24mo",l:"long-term returns equal those of the first four months — yet most measurement stops at 30 days",s:"Ekimetrics, Google"},{v:"2×",l:"the prices strong brands command vs. weak brands in the same category without losing volume",s:"Kantar / Google, 2024"},{v:"$1.85",l:"required to recover $1 of market share lost through a brand spend cut",s:"BCG brand impact analysis"}].map(s=>`<div class="card"><div style="font-size:24px;font-weight:700;color:#7756FF;line-height:1">${s.v}</div><div style="font-size:11px;color:#2B2A29;line-height:1.5;margin:6px 0">${s.l}</div><div style="font-size:10px;color:#ABABAB;opacity:.7">${s.s}</div></div>`).join("")}
+    </div>
+    <div class="grid2" style="margin-bottom:14px">
+      ${[{color:"#7756FF",title:"Long-term carryover",text:"Marketing returns in months 5-24 equal those of the first four months. Stop measuring at 30 days and you've accounted for half the value created.",stat:"Months 5-24 = Months 0-4",src:"Ekimetrics meta-analysis, 36+ studies"},{color:"#AFAAF9",title:"Brand amplifies performance",text:"A 1% increase in brand awareness drives +0.4% short-term and +0.6% long-term sales simultaneously. Brand and performance reinforce each other.",stat:"+1% awareness → +1% total sales",src:"Nielsen MMM, 20 CPG brands, Google"},{color:"#E3FF43",title:"Pricing power",text:"Strong brands command up to 2× the price of weak brands. Moving toward brand-building communication reduces price elasticity by up to 20%.",stat:"Up to 2× price premium",src:"Kantar, UK / DE, 2024"},{color:"#ABABAB",title:"The cost of cutting",text:"Brands risk losing 2% of future revenue per quarter they stop advertising. Recovery takes 3-5 years and costs $1.85 for every $1 saved.",stat:"$1.85 to recover $1 saved",src:"BCG / Nielsen / Google-Ipsos MMA"}].map(m=>`<div class="card" style="border-left:3px solid ${m.color}"><div style="font-size:12px;font-weight:700;margin-bottom:6px">${m.title}</div><p style="font-size:11px;color:#ABABAB;line-height:1.6;margin-bottom:8px">${m.text}</p><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:11px;font-weight:700">${m.stat}</span><span style="font-size:10px;color:#ABABAB;opacity:.7;text-align:right;max-width:160px">${m.src}</span></div></div>`).join("")}
+    </div>
+    <div style="background:#7756FF;border-radius:8px;padding:16px 18px">
+      <div style="font-size:12px;font-weight:700;color:#F5F5F5;margin-bottom:8px">What the BVI measures — and what it doesn't</div>
+      <div class="grid3">
+        ${[{label:"Reliably tracks",color:"#5DCAA5",text:"Direction of brand health over 6-12 months. Whether you're outpacing the category or riding it. Relative competitive position."},{label:"Measures with caveats",color:"#FAC775",text:"Category context (rising-tide vs brand-specific). Survey recall figures. Competitive sentiment from Meltwater."},{label:"Requires MMM layer",color:"#F09595",text:"Exact revenue attribution to brand activity. Long-term carryover ROAS. Pricing power delta. The BVI feeds that model."}].map(c=>`<div style="background:rgba(245,245,245,.1);border-radius:5px;padding:10px 12px;border-top:2px solid ${c.color}"><div style="font-size:10px;font-weight:700;color:${c.color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${c.label}</div><p style="font-size:11px;color:#F5F5F5;line-height:1.6;opacity:.85">${c.text}</p></div>`).join("")}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>
