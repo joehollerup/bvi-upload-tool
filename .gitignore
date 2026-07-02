@@ -33,5 +33,12 @@ Traffic_acquisition_*.csv
 keen_bvi_dashboard.html
 keen_bvi_output.json
 
+# Database
+bvi.db
+
+# Internal feedback / notes
+*_feedback*.md
+*_notes*.md
+
 # macOS
 .DS_Store

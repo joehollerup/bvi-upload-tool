@@ -16,6 +16,7 @@ G_data must include "months", "position", and "ctr" keys (from parse_gsc.load_fr
 S must include "net" key per month (from parse_social.load_from).
 """
 
+import json
 import os
 from datetime import datetime
 
@@ -253,13 +254,21 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'categoryContext:{js_str(catctx)},competitiveShift:{js_str(compshift)},'
             f'recommendation:{js_str(reco)}}}'
         )
-        rows.append((m, obj))
 
-    months_lbls = ",".join(f'"{label(m)}"' for m, _ in rows)
-    cat_p = ",".join(str(cat[m].get(primary, "null")) for m, _ in rows)
-    cat_2 = ",".join(str(cat[m].get(cat2, "null")) if cat2 else "null" for m, _ in rows)
-    cat_3 = ",".join(str(cat[m].get(cat3, "null")) if cat3 else "null" for m, _ in rows)
-    raw_js = ",\n  ".join(obj for _, obj in rows)
+        # Storage dict: JS obj string + cat series values needed to rebuild CAT_TRENDS arrays
+        storage = {
+            "obj": obj,
+            "catTrends": cat_primary,
+            "cat2Trends": cat[m].get(cat2) if m in cat and cat2 else None,
+            "cat3Trends": cat[m].get(cat3) if m in cat and cat3 else None,
+        }
+        rows.append((m, obj, storage))
+
+    months_lbls = ",".join(f'"{label(m)}"' for m, _, _s in rows)
+    cat_p = ",".join(str(cat[m].get(primary, "null")) for m, _, _s in rows)
+    cat_2 = ",".join(str(cat[m].get(cat2, "null")) if cat2 else "null" for m, _, _s in rows)
+    cat_3 = ",".join(str(cat[m].get(cat3, "null")) if cat3 else "null" for m, _, _s in rows)
+    raw_js = ",\n  ".join(obj for _, obj, _s in rows)
 
     block = (
         "// ── DATA ────────────────────────────────────────────────────────────────────\n"
@@ -271,7 +280,8 @@ def _build_data_block(cfg, T, G_data, A, S):
         "const SURVEYS = [];\n\n"
         "// ── STATE ────────────────────────────────────────────────────────────────────\n"
     )
-    return block
+    month_rows = [(m, storage) for m, _, storage in rows]
+    return block, month_rows, results
 
 
 # ── Replacement list ────────────────────────────────────────────────────────
@@ -588,9 +598,26 @@ _CHART_FIXES = [
 
 # ── Public entry point ──────────────────────────────────────────────────────
 
+def _apply_template(block, cfg):
+    """Splice block into the template and apply all replacements. Returns html string."""
+    html = open(SRC).read()
+    start = html.index("// ── DATA")
+    end = html.index("// ── STATE") + len("// ── STATE ────────────────────────────────────────────────────────────────────\n")
+    html = html[:start] + block + html[end:]
+    for old, new in _get_repl_list(cfg):
+        html = html.replace(old, new)
+    for old, new in _CHART_FIXES:
+        if old in html:
+            html = html.replace(old, new)
+    return html
+
+
 def generate(client_config, T, G_data, A, S):
-    """Build and return a complete dashboard HTML string for the given client."""
-    # Auto-detect primary / cat2 / cat3 from Trends Export 2 if not provided
+    """Build dashboard. Returns (html, month_rows, results).
+
+    month_rows: list of (month_str, storage_dict) — store in score_runs.
+    results: dict keyed by month from score_bvi.compute().
+    """
     cfg = dict(client_config)
     brand_key = cfg["brand_key"]
     cat = T["cat"]
@@ -601,18 +628,33 @@ def generate(client_config, T, G_data, A, S):
     cfg.setdefault("cat2", sorted_terms[1] if len(sorted_terms) > 1 else cfg["primary"])
     cfg.setdefault("cat3", sorted_terms[2] if len(sorted_terms) > 2 else cfg["primary"])
 
-    block = _build_data_block(cfg, T, G_data, A, S)
+    block, month_rows, results = _build_data_block(cfg, T, G_data, A, S)
+    html = _apply_template(block, cfg)
+    return html, month_rows, results
 
-    html = open(SRC).read()
-    start = html.index("// ── DATA")
-    end = html.index("// ── STATE") + len("// ── STATE ────────────────────────────────────────────────────────────────────\n")
-    html = html[:start] + block + html[end:]
 
-    for old, new in _get_repl_list(cfg):
-        html = html.replace(old, new)
+def generate_from_stored_rows(client_config, stored_rows):
+    """Reconstruct dashboard HTML from DB rows without re-parsing CSVs.
 
-    for old, new in _CHART_FIXES:
-        if old in html:
-            html = html.replace(old, new)
+    stored_rows: list of dicts with keys: month, obj, catTrends, cat2Trends, cat3Trends.
+    """
+    cfg = dict(client_config)
+    sorted_rows = sorted(stored_rows, key=lambda r: r["month"])
 
-    return html
+    months_lbls = ",".join(f'"{label(r["month"])}"' for r in sorted_rows)
+    cat_p = ",".join(str(r["catTrends"]) if r.get("catTrends") is not None else "null" for r in sorted_rows)
+    cat_2 = ",".join(str(r["cat2Trends"]) if r.get("cat2Trends") is not None else "null" for r in sorted_rows)
+    cat_3 = ",".join(str(r["cat3Trends"]) if r.get("cat3Trends") is not None else "null" for r in sorted_rows)
+    raw_js = ",\n  ".join(r["obj"] for r in sorted_rows)
+
+    block = (
+        "// ── DATA ────────────────────────────────────────────────────────────────────\n"
+        f"const MONTHS = [{months_lbls}];\n"
+        f"const CAT_TRENDS  = [{cat_p}];\n"
+        f"const CAT_TRENDS2 = [{cat_2}];\n"
+        f"const CAT_TRENDS3 = [{cat_3}];\n\n"
+        f"const RAW = [\n  {raw_js}\n];\n\n"
+        "const SURVEYS = [];\n\n"
+        "// ── STATE ────────────────────────────────────────────────────────────────────\n"
+    )
+    return _apply_template(block, cfg)

@@ -2,8 +2,10 @@
 """BVI Self-Serve Upload App — Flask web app for scoring client dashboards.
 
 Routes:
-  GET  /       Upload form (Fusepoint-styled)
-  POST /score  Process uploaded files and return dashboard HTML
+  GET  /              Home page — client list
+  GET  /new           Upload form (Fusepoint-styled)
+  POST /score         Process uploaded files → redirect to /client/<id>
+  GET  /client/<id>   Client dashboard
 """
 
 import os
@@ -11,17 +13,280 @@ import sys
 import tempfile
 import shutil
 import traceback
+import json
+from datetime import datetime
 
-from flask import Flask, request, Response
+from flask import Flask, request, Response, redirect, url_for
 
 import parse_trends
 import parse_gsc
 import parse_ga4
 import parse_social
 import generate_dashboard
+import db
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
+
+db.init_db()
+
+
+# ── Home page ────────────────────────────────────────────────────────────────
+
+_NAV = """
+<nav>
+  <div class="nav-inner">
+    <span class="nav-logo">Fusepoint</span>
+    <span class="nav-title">Brand Velocity Index</span>
+    {nav_right}
+  </div>
+</nav>"""
+
+_SHARED_CSS = """
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #FAF7F2;
+    color: #1F1E1D;
+    min-height: 100vh;
+  }
+  nav {
+    background: #1F1E1D;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .nav-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .nav-logo {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 16px;
+    color: #FAF7F2;
+  }
+  .nav-title {
+    font-size: 11px;
+    color: #6B6864;
+    margin-right: auto;
+  }
+  a.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 16px;
+    border-radius: 6px;
+    background: #FFCF70;
+    color: #1F1E1D;
+    text-decoration: none;
+    transition: opacity .15s;
+  }
+  a.btn-primary:hover { opacity: .85; }
+  a.btn-ghost {
+    font-size: 13px;
+    font-weight: 500;
+    color: #B5B0A6;
+    text-decoration: none;
+    transition: color .15s;
+  }
+  a.btn-ghost:hover { color: #FAF7F2; }"""
+
+
+def _fmt_month(m):
+    if not m:
+        return "—"
+    try:
+        return datetime.strptime(m + "-01", "%Y-%m-%d").strftime("%b '%y")
+    except Exception:
+        return m
+
+
+def render_home():
+    rows = db.get_all_clients_with_latest_run()
+
+    if not rows:
+        body = """
+      <div class="empty">
+        <div class="empty-icon">📊</div>
+        <div class="empty-title">No clients yet</div>
+        <div class="empty-sub">Upload your first client's data to generate a BVI dashboard.</div>
+        <a class="btn-primary" href="/new" style="margin-top:20px">+ New Client</a>
+      </div>"""
+    else:
+        cards = []
+        for r in rows:
+            bvi = round(r["bvi_score"]) if r["bvi_score"] is not None else None
+            bvi_display = str(bvi) if bvi is not None else "—"
+            momentum = r["momentum"] or ""
+            tier = (r["tier"] or "").capitalize()
+
+            if momentum == "Rising":
+                badge_style = "background:rgba(15,110,86,.1);color:#0F6E56"
+                badge_text = "↑ Rising"
+            elif momentum == "Declining":
+                badge_style = "background:rgba(186,117,23,.1);color:#BA7517"
+                badge_text = "↓ Declining"
+            elif momentum:
+                badge_style = "background:rgba(139,135,130,.12);color:#6B6864"
+                badge_text = f"→ {momentum}"
+            else:
+                badge_style = "background:rgba(139,135,130,.12);color:#6B6864"
+                badge_text = "—"
+
+            if tier == "Gold":
+                tier_style = "background:rgba(255,207,112,.25);color:#92620A"
+            elif tier == "Silver":
+                tier_style = "background:rgba(229,226,220,.5);color:#4A4845"
+            elif tier:
+                tier_style = "background:rgba(229,226,220,.4);color:#6B6864"
+            else:
+                tier_style = "display:none"
+
+            month_label = _fmt_month(r["month"])
+
+            cards.append(f"""
+      <a class="client-card" href="/client/{r['id']}">
+        <div class="card-top">
+          <div class="card-name">{r['name']}</div>
+          {f'<span class="tier-badge" style="{tier_style}">{tier}</span>' if tier else ''}
+        </div>
+        <div class="bvi-score">{bvi_display}</div>
+        <div class="bvi-label">BVI Score</div>
+        <div class="card-footer">
+          <span class="momentum-badge" style="{badge_style}">{badge_text}</span>
+          <span class="card-date">{month_label}</span>
+        </div>
+      </a>""")
+
+        body = f'<div class="card-grid">{"".join(cards)}</div>'
+
+    nav = _NAV.format(nav_right='<a class="btn-primary" href="/new">+ New Client</a>')
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BVI — Clients</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+{_SHARED_CSS}
+  .page {{ max-width: 1100px; margin: 0 auto; padding: 36px 24px 64px; }}
+  .page-header {{ margin-bottom: 28px; display: flex; align-items: baseline; gap: 12px; }}
+  .page-heading {{
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 26px;
+    font-weight: 400;
+  }}
+  .client-count {{ font-size: 13px; color: #8A8782; }}
+  .card-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }}
+  .client-card {{
+    background: #FFFFFF;
+    border: 0.5px solid #E5E2DC;
+    border-radius: 8px;
+    padding: 20px;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: box-shadow .15s, border-color .15s;
+    cursor: pointer;
+  }}
+  .client-card:hover {{
+    box-shadow: 0 2px 12px rgba(31,30,29,.08);
+    border-color: #D5D1CB;
+  }}
+  .card-top {{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+  }}
+  .card-name {{
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1.2;
+  }}
+  .tier-badge {{
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 2px 7px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    margin-top: 3px;
+  }}
+  .bvi-score {{
+    font-size: 42px;
+    font-weight: 400;
+    font-family: 'Instrument Serif', Georgia, serif;
+    line-height: 1;
+    color: #1F1E1D;
+  }}
+  .bvi-label {{
+    font-size: 10px;
+    color: #8A8782;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 14px;
+  }}
+  .card-footer {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+  }}
+  .momentum-badge {{
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }}
+  .card-date {{ font-size: 11px; color: #8A8782; }}
+  .empty {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 80px 20px;
+    text-align: center;
+  }}
+  .empty-icon {{ font-size: 36px; margin-bottom: 14px; }}
+  .empty-title {{
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 22px;
+    margin-bottom: 8px;
+  }}
+  .empty-sub {{ font-size: 14px; color: #6B6864; max-width: 340px; line-height: 1.6; }}
+</style>
+</head>
+<body>
+{nav}
+<div class="page">
+  <div class="page-header">
+    <h1 class="page-heading">Clients</h1>
+    {f'<span class="client-count">{len(rows)} client{"s" if len(rows) != 1 else ""}</span>' if rows else ''}
+  </div>
+  {body}
+</div>
+</body>
+</html>"""
 
 
 # ── Upload form ─────────────────────────────────────────────────────────────
@@ -41,24 +306,38 @@ FORM_HTML = """<!DOCTYPE html>
     background: #FAF7F2;
     color: #1F1E1D;
     min-height: 100vh;
-    padding: 32px 16px 64px;
+    padding: 0 0 64px;
   }
-  .page { max-width: 720px; margin: 0 auto; }
-  .banner {
+  .page { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+  nav {
     background: #1F1E1D;
-    border-radius: 8px;
-    padding: 10px 18px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    margin-bottom: 32px;
+  }
+  .nav-inner {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 16px;
+    height: 48px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 28px;
+    gap: 14px;
   }
-  .banner-logo {
+  .nav-logo {
     font-family: 'Instrument Serif', Georgia, serif;
     font-size: 16px;
     color: #FAF7F2;
   }
-  .banner-sub { font-size: 11px; color: #B5B0A6; margin-left: auto; }
+  .nav-title { font-size: 11px; color: #6B6864; margin-right: auto; }
+  .nav-back {
+    font-size: 12px;
+    font-weight: 500;
+    color: #B5B0A6;
+    text-decoration: none;
+  }
+  .nav-back:hover { color: #FAF7F2; }
   h1 {
     font-family: 'Instrument Serif', Georgia, serif;
     font-size: 28px;
@@ -164,14 +443,16 @@ FORM_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
+<nav>
+  <div class="nav-inner">
+    <span class="nav-logo">Fusepoint</span>
+    <span class="nav-title">Brand Velocity Index</span>
+    <a class="nav-back" href="/">← All Clients</a>
+  </div>
+</nav>
 <div class="page">
 
-  <div class="banner">
-    <span class="banner-logo">Fusepoint</span>
-    <span class="banner-sub">BVI Self-Serve Tool — Internal only</span>
-  </div>
-
-  <h1>Score a Client Dashboard</h1>
+  <h1 style="font-family:'Instrument Serif',Georgia,serif;font-size:28px;font-weight:400;margin-bottom:6px">Score a Client Dashboard</h1>
   <p class="subtitle">Upload the client's data exports to generate a scored BVI dashboard.</p>
 
   {error_block}
@@ -299,6 +580,11 @@ def render_form(error=None):
 
 @app.route("/", methods=["GET"])
 def index():
+    return render_home()
+
+
+@app.route("/new", methods=["GET"])
+def new_client():
     return render_form()
 
 
@@ -324,11 +610,14 @@ def _save(file_obj, tmpdir, name):
     return path
 
 
-def _score(tmpdir):
-    f = request.files
-    form = request.form
+def _parse_uploads(tmpdir):
+    """Save and parse all uploaded files from the current request.
 
-    # Validate required files
+    Returns (T, brand_key, rivals, G_data, A, S).
+    Raises ValueError with a user-facing message on missing/invalid files.
+    """
+    f = request.files
+
     missing = []
     if not f.get("gsc_zip") or f["gsc_zip"].filename == "":
         missing.append("GSC ZIP export")
@@ -337,16 +626,12 @@ def _score(tmpdir):
     if not f.get("trends2") or f["trends2"].filename == "":
         missing.append("Google Trends Export 2 (brand vs category)")
     if missing:
-        return render_form(
-            error="Missing required file(s): " + ", ".join(missing)
-        ), 400
+        raise ValueError("Missing required file(s): " + ", ".join(missing))
 
-    # Save required files
     gsc_zip_path = _save(f["gsc_zip"], tmpdir, "gsc.zip")
     trends1_path = _save(f["trends1"], tmpdir, "trends1.csv")
     trends2_path = _save(f["trends2"], tmpdir, "trends2.csv")
 
-    # Save optional files
     ga4_paths = []
     for i, ga4_file in enumerate(f.getlist("ga4_files")):
         if ga4_file and ga4_file.filename:
@@ -360,41 +645,46 @@ def _score(tmpdir):
     if f.get("tiktok") and f["tiktok"].filename:
         tt_path = _save(f["tiktok"], tmpdir, "tiktok.csv")
 
-    # Parse Trends Export 1 to auto-detect brand_key and rivals
     try:
         T = parse_trends.load_from([trends1_path, trends2_path])
     except Exception as e:
-        return render_form(error=f"Failed to parse Trends files: {e}"), 400
+        raise ValueError(f"Failed to parse Trends files: {e}")
 
     comp_first = next(iter(T["comp"].values()))
     all_keys = list(comp_first.keys())
     brand_key = all_keys[0]
-    rivals = all_keys[1:]  # up to 3 competitors
+    rivals = all_keys[1:]
 
-    # Parse GSC
     gsc_extract_dir = os.path.join(tmpdir, "gsc_extract")
     try:
         G_data = parse_gsc.load_from(gsc_zip_path, gsc_extract_dir, brand_key)
     except Exception as e:
-        return render_form(error=f"Failed to parse GSC ZIP: {e}"), 400
+        raise ValueError(f"Failed to parse GSC ZIP: {e}")
 
-    # Parse GA4 (optional)
     A = {}
     if ga4_paths:
         try:
             A = parse_ga4.load_from(ga4_paths)
         except Exception as e:
-            return render_form(error=f"Failed to parse GA4 CSV(s): {e}"), 400
+            raise ValueError(f"Failed to parse GA4 CSV(s): {e}")
 
-    # Parse social (optional)
     S = {}
     if ig_path or tt_path:
         try:
             S = parse_social.load_from(ig_path=ig_path, tt_path=tt_path)
         except Exception as e:
-            return render_form(error=f"Failed to parse social file(s): {e}"), 400
+            raise ValueError(f"Failed to parse social file(s): {e}")
 
-    # Build client config
+    return T, brand_key, rivals, G_data, A, S
+
+
+def _score(tmpdir):
+    try:
+        T, brand_key, rivals, G_data, A, S = _parse_uploads(tmpdir)
+    except ValueError as e:
+        return render_form(error=str(e)), 400
+
+    form = request.form
     client_name = form.get("client_name", "").strip() or brand_key
     comp_input = form.get("competitors", "").strip()
     comp_display = [c.strip() for c in comp_input.split(",") if c.strip()] if comp_input else rivals
@@ -406,9 +696,8 @@ def _score(tmpdir):
         "comp_display": comp_display,
     }
 
-    # Generate dashboard
     try:
-        html = generate_dashboard.generate(client_config, T, G_data, A, S)
+        html, month_rows, results = generate_dashboard.generate(client_config, T, G_data, A, S)
     except Exception as e:
         tb = traceback.format_exc()
         print(tb, file=sys.stderr)
@@ -417,7 +706,398 @@ def _score(tmpdir):
                   f"<code style='font-size:11px;white-space:pre-wrap'>{tb}</code>"
         ), 500
 
+    try:
+        client_id = db.upsert_client(client_config)
+        db.save_score_runs(client_id, month_rows, results)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        return Response(html, mimetype="text/html")
+
+    return redirect(url_for("client_detail", client_id=client_id))
+
+
+@app.route("/client/<int:client_id>")
+def client_detail(client_id):
+    client = db.get_client(client_id)
+    if not client:
+        return render_form(error=f"Client {client_id} not found."), 404
+
+    runs = db.get_score_runs(client_id)
+    if not runs:
+        return render_form(error=f"No score data found for client {client_id}."), 404
+
+    client_config = json.loads(client["config_json"])
+
+    stored_rows = []
+    for run in runs:
+        storage = json.loads(run["dashboard_data_json"])
+        storage["month"] = run["month"]
+        stored_rows.append(storage)
+
+    try:
+        html = generate_dashboard.generate_from_stored_rows(client_config, stored_rows)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        return render_form(
+            error=f"Dashboard reconstruction failed: {e}<br>"
+                  f"<code style='font-size:11px;white-space:pre-wrap'>{tb}</code>"
+        ), 500
+
+    # Inject floating admin buttons — avoids z-index battles with the dashboard's own nav
+    fab_css = (
+        "<style>"
+        "#_fp_back{position:fixed;bottom:24px;left:24px;z-index:99999;"
+        "background:#1F1E1D;color:#B5B0A6;font-size:12px;font-weight:500;"
+        "padding:8px 14px;border-radius:6px;text-decoration:none;"
+        "font-family:Inter,-apple-system,sans-serif;"
+        "box-shadow:0 2px 8px rgba(0,0,0,.25);transition:color .15s}"
+        "#_fp_back:hover{color:#FAF7F2}"
+        "#_fp_update{position:fixed;bottom:24px;right:24px;z-index:99999;"
+        "background:#FFCF70;color:#1F1E1D;font-size:13px;font-weight:600;"
+        "padding:10px 20px;border-radius:8px;text-decoration:none;"
+        "font-family:Inter,-apple-system,sans-serif;"
+        "box-shadow:0 2px 12px rgba(0,0,0,.2);transition:opacity .15s}"
+        "#_fp_update:hover{opacity:.85}"
+        "</style>"
+    )
+    fab_html = (
+        f'<a id="_fp_back" href="/">← Clients</a>'
+        f'<a id="_fp_update" href="/client/{client_id}/update">+ Add Monthly Data</a>'
+    )
+    html = html.replace("</body>", fab_css + fab_html + "</body>", 1)
+
     return Response(html, mimetype="text/html")
+
+
+# ── Update form ──────────────────────────────────────────────────────────────
+
+def render_update_form(client_config, client_id, error=None):
+    name = client_config.get("client_name", "")
+    brand_key = client_config.get("brand_key", "")
+    rivals = client_config.get("rivals", [])
+    comp_display = client_config.get("comp_display", rivals)
+    comp_value = ", ".join(comp_display)
+
+    primary = client_config.get("primary", "")
+    cat2 = client_config.get("cat2", "")
+    cat3 = client_config.get("cat3", "")
+    cat_terms = ", ".join(t for t in [primary, cat2, cat3] if t and t != primary or t == primary)
+    # deduplicate while preserving order
+    seen, cat_list = set(), []
+    for t in [primary, cat2, cat3]:
+        if t and t not in seen:
+            seen.add(t)
+            cat_list.append(t)
+    cat_terms = ", ".join(f'"{t}"' for t in cat_list)
+
+    error_block = (
+        f'<div class="error-banner"><strong>Error</strong> {error}</div>'
+        if error else ""
+    )
+
+    rivals_display = ", ".join(rivals) if rivals else "none detected yet"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add Monthly Data — {name}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #FAF7F2;
+    color: #1F1E1D;
+    min-height: 100vh;
+    padding: 0 0 64px;
+  }}
+  .page {{ max-width: 720px; margin: 0 auto; padding: 0 16px; }}
+  nav {{
+    background: #1F1E1D;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    margin-bottom: 32px;
+  }}
+  .nav-inner {{
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 16px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }}
+  .nav-logo {{ font-family: 'Instrument Serif', Georgia, serif; font-size: 16px; color: #FAF7F2; }}
+  .nav-title {{ font-size: 11px; color: #6B6864; margin-right: auto; }}
+  .nav-back {{ font-size: 12px; font-weight: 500; color: #B5B0A6; text-decoration: none; }}
+  .nav-back:hover {{ color: #FAF7F2; }}
+  h1 {{
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 28px;
+    font-weight: 400;
+    margin-bottom: 6px;
+  }}
+  .subtitle {{ font-size: 13px; color: #6B6864; margin-bottom: 28px; }}
+  .card {{
+    background: #FFFFFF;
+    border: 0.5px solid #E5E2DC;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }}
+  .card-title {{
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #8A8782;
+    margin-bottom: 14px;
+  }}
+  .info-row {{
+    font-size: 12px;
+    color: #6B6864;
+    background: #F5F0E6;
+    border-radius: 5px;
+    padding: 8px 12px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }}
+  .info-row strong {{ color: #1F1E1D; font-weight: 600; }}
+  .field {{ margin-bottom: 14px; }}
+  .field:last-child {{ margin-bottom: 0; }}
+  label {{ display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }}
+  .hint {{ font-size: 11px; color: #8A8782; margin-top: 3px; line-height: 1.5; }}
+  input[type=text], input[type=file] {{
+    width: 100%;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 0.5px solid #E5E2DC;
+    border-radius: 5px;
+    background: #FAF7F2;
+    color: #1F1E1D;
+    outline: none;
+    transition: border-color .15s;
+  }}
+  input[type=text]:focus, input[type=file]:focus {{
+    border-color: #FFCF70;
+    background: #FFFFFF;
+  }}
+  input[type=file] {{ padding: 6px 10px; cursor: pointer; }}
+  .row2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+  .divider {{ border: none; border-top: 0.5px solid #E5E2DC; margin: 20px 0; }}
+  .badge-required {{
+    display: inline-block;
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    padding: 1px 6px; border-radius: 3px;
+    background: rgba(255,207,112,.25); color: #1F1E1D;
+    margin-left: 6px; vertical-align: middle;
+  }}
+  .badge-optional {{
+    display: inline-block;
+    font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    padding: 1px 6px; border-radius: 3px;
+    background: #F5F0E6; color: #8A8782;
+    margin-left: 6px; vertical-align: middle;
+  }}
+  .submit-row {{ margin-top: 24px; display: flex; align-items: center; gap: 16px; }}
+  button[type=submit] {{
+    font-family: 'Inter', sans-serif;
+    font-size: 14px; font-weight: 600;
+    padding: 10px 28px;
+    border: none; border-radius: 6px;
+    background: #FFCF70; color: #1F1E1D;
+    cursor: pointer; transition: opacity .15s;
+  }}
+  button[type=submit]:hover {{ opacity: .85; }}
+  .cancel-link {{ font-size: 13px; color: #8A8782; text-decoration: none; }}
+  .cancel-link:hover {{ color: #1F1E1D; }}
+  .error-banner {{
+    background: #FFF3F3; border: 0.5px solid #F5A0A0;
+    border-radius: 6px; padding: 12px 16px; margin-bottom: 20px;
+    font-size: 13px; color: #B91C1C; line-height: 1.6;
+  }}
+  .error-banner strong {{ display: block; margin-bottom: 4px; }}
+</style>
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="nav-logo">Fusepoint</span>
+    <span class="nav-title">Brand Velocity Index</span>
+    <a class="nav-back" href="/client/{client_id}">← {name}</a>
+  </div>
+</nav>
+<div class="page">
+
+  <h1>Add Monthly Data</h1>
+  <p class="subtitle">Upload new exports to add or refresh months in the {name} dashboard.</p>
+
+  {error_block}
+
+  <form method="POST" action="/client/{client_id}/update" enctype="multipart/form-data">
+
+    <div class="card">
+      <div class="card-title">Client Config</div>
+      <div class="info-row">
+        <strong>Brand key:</strong> {brand_key} &nbsp;·&nbsp;
+        <strong>Rivals:</strong> {rivals_display}
+        {f' &nbsp;·&nbsp; <strong>Category terms:</strong> {cat_terms}' if cat_terms else ''}
+        <br>Brand key and category terms are re-detected from your Trends exports on each upload.
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>Client Name</label>
+          <input type="text" name="client_name" value="{name}" required>
+          <div class="hint">Shown in the dashboard header.</div>
+        </div>
+        <div class="field">
+          <label>Competitors <span style="font-weight:400;color:#8A8782;font-size:11px">(comma-separated)</span></label>
+          <input type="text" name="competitors" value="{comp_value}">
+          <div class="hint">Display names matching Trends Export 1 column order.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Search Files</div>
+      <div class="field">
+        <label>GSC ZIP Export <span class="badge-required">Required</span></label>
+        <input type="file" name="gsc_zip" accept=".zip" required>
+        <div class="hint">Google Search Console → Performance → Export → Download ZIP.</div>
+      </div>
+      <hr class="divider">
+      <div class="field">
+        <label>Google Trends Export 1 — Brand vs Competitors <span class="badge-required">Required</span></label>
+        <input type="file" name="trends1" accept=".csv" required>
+        <div class="hint">First column = brand key; remaining columns = competitors.</div>
+      </div>
+      <div class="field">
+        <label>Google Trends Export 2 — Brand vs Category Terms <span class="badge-required">Required</span></label>
+        <input type="file" name="trends2" accept=".csv" required>
+        <div class="hint">Brand vs 2–3 category search terms.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">GA4 Traffic</div>
+      <div class="field">
+        <label>GA4 Traffic Acquisition CSVs <span class="badge-optional">Optional</span></label>
+        <input type="file" name="ga4_files" accept=".csv" multiple>
+        <div class="hint">One CSV per month. Ctrl/Cmd+click to select multiple.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Social Media</div>
+      <div class="row2">
+        <div class="field">
+          <label>Instagram Manual Numbers <span class="badge-optional">Optional</span></label>
+          <input type="file" name="instagram" accept=".csv">
+          <div class="hint">Monthly Instagram metrics CSV.</div>
+        </div>
+        <div class="field">
+          <label>TikTok Manual Numbers <span class="badge-optional">Optional</span></label>
+          <input type="file" name="tiktok" accept=".csv">
+          <div class="hint">Same format as Instagram.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="submit-row">
+      <button type="submit">Score New Data →</button>
+      <a class="cancel-link" href="/client/{client_id}">Cancel</a>
+    </div>
+
+  </form>
+</div>
+</body>
+</html>"""
+
+
+@app.route("/client/<int:client_id>/update", methods=["GET"])
+def update_form(client_id):
+    client = db.get_client(client_id)
+    if not client:
+        return render_form(error=f"Client {client_id} not found."), 404
+    client_config = json.loads(client["config_json"])
+    return render_update_form(client_config, client_id)
+
+
+@app.route("/client/<int:client_id>/update", methods=["POST"])
+def update_score(client_id):
+    client = db.get_client(client_id)
+    if not client:
+        return render_form(error=f"Client {client_id} not found."), 404
+    existing_config = json.loads(client["config_json"])
+
+    tmpdir = tempfile.mkdtemp(prefix="bvi_")
+    try:
+        return _update_score(client_id, existing_config, tmpdir)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        msg = f"<br><code style='font-size:12px;white-space:pre-wrap'>{tb}</code>"
+        return render_update_form(existing_config, client_id, error=msg), 500
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _update_score(client_id, existing_config, tmpdir):
+    try:
+        T, brand_key, rivals, G_data, A, S = _parse_uploads(tmpdir)
+    except ValueError as e:
+        return render_update_form(existing_config, client_id, error=str(e)), 400
+
+    form = request.form
+    client_name = form.get("client_name", "").strip() or existing_config.get("client_name", brand_key)
+    comp_input = form.get("competitors", "").strip()
+    comp_display = [c.strip() for c in comp_input.split(",") if c.strip()] if comp_input else rivals
+
+    # Preserve previously detected category terms; generate() will re-detect and setdefault
+    client_config = {
+        **existing_config,
+        "client_name": client_name,
+        "brand_key": brand_key,
+        "rivals": rivals,
+        "comp_display": comp_display,
+    }
+
+    try:
+        _html, month_rows, results = generate_dashboard.generate(client_config, T, G_data, A, S)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        return render_update_form(
+            existing_config, client_id,
+            error=f"Scoring failed: {e}<br>"
+                  f"<code style='font-size:11px;white-space:pre-wrap'>{tb}</code>"
+        ), 500
+
+    # generate() may have set primary/cat2/cat3 — capture the updated cfg
+    # by re-building it with the same logic generate() uses internally
+    cat = T["cat"]
+    cat_terms_list = [k for k in next(iter(cat.values())) if k != brand_key]
+    means = {t: sum(cat[mo][t] for mo in cat) / len(cat) for t in cat_terms_list}
+    sorted_terms = sorted(cat_terms_list, key=lambda t: means[t], reverse=True)
+    client_config.setdefault("primary", sorted_terms[0] if sorted_terms else "Category")
+    client_config.setdefault("cat2", sorted_terms[1] if len(sorted_terms) > 1 else client_config["primary"])
+    client_config.setdefault("cat3", sorted_terms[2] if len(sorted_terms) > 2 else client_config["primary"])
+
+    try:
+        db.upsert_client(client_config)
+        db.save_score_runs(client_id, month_rows, results)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+
+    return redirect(url_for("client_detail", client_id=client_id))
 
 
 if __name__ == "__main__":
