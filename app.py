@@ -111,63 +111,60 @@ def _fmt_month(m):
 def render_home():
     rows = db.get_all_clients_with_latest_run()
 
+    # Build card HTML
     if not rows:
-        body = """
+        cards_html = """
       <div class="empty">
-        <div class="empty-icon">📊</div>
+        <div class="empty-icon">◻</div>
         <div class="empty-title">No clients yet</div>
-        <div class="empty-sub">Upload your first client's data to generate a BVI dashboard.</div>
-        <a class="btn-primary" href="/new" style="margin-top:20px">+ New Client</a>
+        <div class="empty-sub">Upload a client's data exports to generate their first BVI dashboard.</div>
+        <a class="btn-new" href="/new" style="margin-top:20px">+ New client</a>
       </div>"""
     else:
         cards = []
         for r in rows:
+            cfg = json.loads(r["config_json"]) if r["config_json"] else {}
+            rivals = cfg.get("rivals", [])
+            n_comp = len(rivals)
+
+            # Count unique category terms
+            cat_terms = {t for t in [cfg.get("primary"), cfg.get("cat2"), cfg.get("cat3")] if t}
+            n_cat = len(cat_terms)
+
             bvi = round(r["bvi_score"]) if r["bvi_score"] is not None else None
-            bvi_display = str(bvi) if bvi is not None else "—"
             momentum = r["momentum"] or ""
-            tier = (r["tier"] or "").capitalize()
-
-            if momentum == "Rising":
-                badge_style = "background:rgba(15,110,86,.1);color:#0F6E56"
-                badge_text = "↑ Rising"
-            elif momentum == "Declining":
-                badge_style = "background:rgba(186,117,23,.1);color:#BA7517"
-                badge_text = "↓ Declining"
-            elif momentum:
-                badge_style = "background:rgba(139,135,130,.12);color:#6B6864"
-                badge_text = f"→ {momentum}"
-            else:
-                badge_style = "background:rgba(139,135,130,.12);color:#6B6864"
-                badge_text = "—"
-
-            if tier == "Gold":
-                tier_style = "background:rgba(255,207,112,.25);color:#92620A"
-            elif tier == "Silver":
-                tier_style = "background:rgba(229,226,220,.5);color:#4A4845"
-            elif tier:
-                tier_style = "background:rgba(229,226,220,.4);color:#6B6864"
-            else:
-                tier_style = "display:none"
-
             month_label = _fmt_month(r["month"])
 
+            if momentum == "Rising":
+                mom_style = "color:#0F6E56"
+                mom_arrow = "↑"
+            elif momentum == "Declining":
+                mom_style = "color:#BA7517"
+                mom_arrow = "↓"
+            else:
+                mom_style = "color:#8A8782"
+                mom_arrow = "→"
+
+            bvi_chip = (
+                f'<span class="bvi-chip">{bvi}</span>'
+                if bvi is not None else ""
+            )
+
+            comp_str = f'{n_comp} competitor{"s" if n_comp != 1 else ""}'
+            cat_str = f'{n_cat} category term{"s" if n_cat != 1 else ""}'
+
             cards.append(f"""
-      <a class="client-card" href="/client/{r['id']}">
-        <div class="card-top">
-          <div class="card-name">{r['name']}</div>
-          {f'<span class="tier-badge" style="{tier_style}">{tier}</span>' if tier else ''}
-        </div>
-        <div class="bvi-score">{bvi_display}</div>
-        <div class="bvi-label">BVI Score</div>
-        <div class="card-footer">
-          <span class="momentum-badge" style="{badge_style}">{badge_text}</span>
-          <span class="card-date">{month_label}</span>
-        </div>
-      </a>""")
+        <a class="client-card" href="/client/{r['id']}">
+          <div class="card-header">
+            <span class="card-name">{r['name']}</span>
+            {bvi_chip}
+          </div>
+          <div class="card-slug">{r['brand_key']}</div>
+          <div class="card-meta">{comp_str} · {cat_str}</div>
+          {f'<div class="card-momentum" style="{mom_style}">{mom_arrow} {momentum} · {month_label}</div>' if momentum else f'<div class="card-momentum" style="color:#C5C0BA">{month_label or "No data yet"}</div>'}
+        </a>""")
 
-        body = f'<div class="card-grid">{"".join(cards)}</div>'
-
-    nav = _NAV.format(nav_right='<a class="btn-primary" href="/new">+ New Client</a>')
+        cards_html = f'<div class="card-grid">{"".join(cards)}</div>'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -178,88 +175,195 @@ def render_home():
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
 <style>
-{_SHARED_CSS}
-  .page {{ max-width: 1100px; margin: 0 auto; padding: 36px 24px 64px; }}
-  .page-header {{ margin-bottom: 28px; display: flex; align-items: baseline; gap: 12px; }}
-  .page-heading {{
-    font-family: 'Instrument Serif', Georgia, serif;
-    font-size: 26px;
-    font-weight: 400;
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html, body {{ height: 100%; }}
+  body {{
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #FAF7F2;
+    color: #1F1E1D;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
   }}
-  .client-count {{ font-size: 13px; color: #8A8782; }}
+
+  /* ── Sidebar ── */
+  .sidebar {{
+    width: 216px;
+    flex-shrink: 0;
+    background: #FFFFFF;
+    border-right: 0.5px solid #E5E2DC;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }}
+  .sidebar-logo {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 16px 16px;
+    border-bottom: 0.5px solid #E5E2DC;
+  }}
+  .logo-mark {{
+    width: 28px;
+    height: 28px;
+    background: #FFCF70;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 15px;
+    color: #1F1E1D;
+    flex-shrink: 0;
+  }}
+  .logo-text {{
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 15px;
+    color: #1F1E1D;
+  }}
+  .sidebar-nav {{
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+  }}
+  .nav-item {{
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6B6864;
+    text-decoration: none;
+    transition: background .1s, color .1s;
+  }}
+  .nav-item:hover {{ background: #F5F0E6; color: #1F1E1D; }}
+  .nav-item.active {{
+    background: #F5F0E6;
+    color: #1F1E1D;
+    border-left: 2px solid #FFCF70;
+    padding-left: 8px;
+  }}
+  .nav-item svg {{ flex-shrink: 0; opacity: .7; }}
+  .nav-item.active svg {{ opacity: 1; }}
+  .sidebar-footer {{
+    padding: 12px 16px;
+    border-top: 0.5px solid #E5E2DC;
+    font-size: 11px;
+    color: #8A8782;
+    line-height: 1.5;
+  }}
+
+  /* ── Main ── */
+  .main {{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }}
+  .topbar {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 28px 32px 0;
+    flex-shrink: 0;
+  }}
+  .topbar-left h1 {{
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-size: 24px;
+    font-weight: 400;
+    color: #1F1E1D;
+    margin-bottom: 3px;
+  }}
+  .topbar-left p {{
+    font-size: 13px;
+    color: #8A8782;
+  }}
+  a.btn-new {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 7px;
+    background: #FFCF70;
+    color: #1F1E1D;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: opacity .15s;
+  }}
+  a.btn-new:hover {{ opacity: .85; }}
+  .content {{
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px 48px;
+  }}
+
+  /* ── Cards ── */
   .card-grid {{
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
   }}
   .client-card {{
     background: #FFFFFF;
     border: 0.5px solid #E5E2DC;
     border-radius: 8px;
-    padding: 20px;
+    padding: 18px 20px;
     text-decoration: none;
     color: inherit;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     transition: box-shadow .15s, border-color .15s;
-    cursor: pointer;
   }}
   .client-card:hover {{
-    box-shadow: 0 2px 12px rgba(31,30,29,.08);
-    border-color: #D5D1CB;
+    box-shadow: 0 2px 12px rgba(31,30,29,.07);
+    border-color: #D0CBC3;
   }}
-  .card-top {{
+  .card-header {{
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 10px;
+    gap: 10px;
+    margin-bottom: 2px;
   }}
   .card-name {{
-    font-family: 'Instrument Serif', Georgia, serif;
-    font-size: 18px;
-    font-weight: 400;
-    line-height: 1.2;
-  }}
-  .tier-badge {{
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .05em;
-    padding: 2px 7px;
-    border-radius: 3px;
-    flex-shrink: 0;
-    margin-top: 3px;
-  }}
-  .bvi-score {{
-    font-size: 42px;
-    font-weight: 400;
-    font-family: 'Instrument Serif', Georgia, serif;
-    line-height: 1;
-    color: #1F1E1D;
-  }}
-  .bvi-label {{
-    font-size: 10px;
-    color: #8A8782;
-    text-transform: uppercase;
-    letter-spacing: .06em;
-    margin-bottom: 14px;
-  }}
-  .card-footer {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: auto;
-  }}
-  .momentum-badge {{
-    font-size: 11px;
+    font-size: 15px;
     font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 4px;
+    color: #1F1E1D;
+    line-height: 1.3;
   }}
-  .card-date {{ font-size: 11px; color: #8A8782; }}
+  .bvi-chip {{
+    font-size: 12px;
+    font-weight: 700;
+    color: #1F1E1D;
+    background: #F5F0E6;
+    border-radius: 5px;
+    padding: 2px 8px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }}
+  .card-slug {{
+    font-family: 'SF Mono', 'Fira Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: #8A8782;
+    margin-bottom: 4px;
+  }}
+  .card-meta {{
+    font-size: 12px;
+    color: #6B6864;
+  }}
+  .card-momentum {{
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 2px;
+  }}
+
+  /* ── Empty state ── */
   .empty {{
     display: flex;
     flex-direction: column;
@@ -267,24 +371,51 @@ def render_home():
     padding: 80px 20px;
     text-align: center;
   }}
-  .empty-icon {{ font-size: 36px; margin-bottom: 14px; }}
+  .empty-icon {{ font-size: 28px; color: #C5C0BA; margin-bottom: 14px; }}
   .empty-title {{
     font-family: 'Instrument Serif', Georgia, serif;
-    font-size: 22px;
+    font-size: 20px;
     margin-bottom: 8px;
   }}
-  .empty-sub {{ font-size: 14px; color: #6B6864; max-width: 340px; line-height: 1.6; }}
+  .empty-sub {{ font-size: 13px; color: #6B6864; max-width: 320px; line-height: 1.6; }}
 </style>
 </head>
 <body>
-{nav}
-<div class="page">
-  <div class="page-header">
-    <h1 class="page-heading">Clients</h1>
-    {f'<span class="client-count">{len(rows)} client{"s" if len(rows) != 1 else ""}</span>' if rows else ''}
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">F</div>
+    <span class="logo-text">Fusepoint</span>
   </div>
-  {body}
+  <nav class="sidebar-nav">
+    <a class="nav-item active" href="/">
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <rect x="1" y="1" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+        <rect x="8.5" y="1" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+        <rect x="1" y="8.5" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+        <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="1" fill="currentColor"/>
+      </svg>
+      Clients
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    BVI Self-Serve · Internal
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>Clients</h1>
+      <p>Brands you score each month.</p>
+    </div>
+    <a class="btn-new" href="/new">+ New client</a>
+  </div>
+  <div class="content">
+    {cards_html}
+  </div>
 </div>
+
 </body>
 </html>"""
 

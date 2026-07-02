@@ -116,7 +116,7 @@ def get_all_clients_with_latest_run():
     """Return all clients joined with their most recent score_run, ordered by name."""
     with _connect() as conn:
         return conn.execute("""
-            SELECT c.id, c.name, c.brand_key, c.created_at,
+            SELECT c.id, c.name, c.brand_key, c.config_json, c.created_at,
                    sr.month, sr.bvi_score, sr.momentum, sr.tier, sr.scored_at
             FROM clients c
             LEFT JOIN score_runs sr ON sr.id = (
