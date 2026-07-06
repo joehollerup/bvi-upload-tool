@@ -828,7 +828,9 @@ def _score(tmpdir):
     }
 
     try:
-        html, month_rows, results = generate_dashboard.generate(client_config, T, G_data, A, S)
+        html, month_rows, results, client_config = generate_dashboard.generate(
+            client_config, T, G_data, A, S
+        )
     except Exception as e:
         tb = traceback.format_exc()
         print(tb, file=sys.stderr)
@@ -1201,7 +1203,9 @@ def _update_score(client_id, existing_config, tmpdir):
     }
 
     try:
-        _html, month_rows, results = generate_dashboard.generate(client_config, T, G_data, A, S)
+        _html, month_rows, results, client_config = generate_dashboard.generate(
+            client_config, T, G_data, A, S
+        )
     except Exception as e:
         tb = traceback.format_exc()
         print(tb, file=sys.stderr)
@@ -1210,16 +1214,6 @@ def _update_score(client_id, existing_config, tmpdir):
             error=f"Scoring failed: {e}<br>"
                   f"<code style='font-size:11px;white-space:pre-wrap'>{tb}</code>"
         ), 500
-
-    # generate() may have set primary/cat2/cat3 — capture the updated cfg
-    # by re-building it with the same logic generate() uses internally
-    cat = T["cat"]
-    cat_terms_list = [k for k in next(iter(cat.values())) if k != brand_key]
-    means = {t: sum(cat[mo][t] for mo in cat) / len(cat) for t in cat_terms_list}
-    sorted_terms = sorted(cat_terms_list, key=lambda t: means[t], reverse=True)
-    client_config.setdefault("primary", sorted_terms[0] if sorted_terms else "Category")
-    client_config.setdefault("cat2", sorted_terms[1] if len(sorted_terms) > 1 else client_config["primary"])
-    client_config.setdefault("cat3", sorted_terms[2] if len(sorted_terms) > 2 else client_config["primary"])
 
     try:
         db.upsert_client(client_config)

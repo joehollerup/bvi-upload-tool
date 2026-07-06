@@ -128,6 +128,7 @@ def _build_data_block(cfg, T, G_data, A, S):
         ds = round(A[m]["direct"] / 1000) if has_ga else None
         os_ = round(A[m]["organic"] / 1000) if has_ga else None
         dpct = round(A[m]["direct_pct"]) if has_ga else None
+        total_k = round(A[m]["total"] / 1000) if has_ga else None
 
         # Social
         er = S[m]["er"] if m in S else None
@@ -235,6 +236,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'directSessions:{jnum(ds)},directSessionsDelta:null,'
             f'directPct:{jnum(dpct)},directPctDelta:null,'
             f'organicSessions:{jnum(os_)},organicSessionsDelta:null,'
+            f'totalSessions:{jnum(total_k)},totalSessionsDelta:null,'
             f'brandedOrganic:null,brandedOrganicDelta:null,'
             f'followerGrowthRate:{jnum(gr,2)},followerGrowthRateDelta:{jnum(gr_d,2)},'
             f'netFollowerGrowth:{jnum(net)},reach:{jnum(reach_k)},'
@@ -294,7 +296,7 @@ def _get_repl_list(cfg):
     while len(comp_display) < 3:
         comp_display.append(f"Competitor {len(comp_display) + 1}")
 
-    primary = cfg["primary"]
+    primary = cfg.get("primary") or "Category"
     cat2 = cfg.get("cat2") or "Category 2"
     cat3 = cfg.get("cat3") or "Category 3"
 
@@ -339,6 +341,10 @@ def _get_repl_list(cfg):
         ('${d.directPct}%', '${d.directPct!=null?d.directPct+"%":"—"}'),
         ('${d.brandedOrganic}%', '${d.brandedOrganic!=null?d.brandedOrganic+"%":"—"}'),
         ('${br.vol}K', '${br.vol!=null?br.vol+"K":"—"}'),
+        # BUG-2: Add "Total sessions" metric card to Digital tab
+        ('${metricCard("Total organic sessions",(d.organicSessions!=null?d.organicSessions.toLocaleString()+"K":"—"),d.organicSessionsDelta,"%","","GA4 — Session channel group = Organic Search.")}',
+         '${metricCard("Total organic sessions",(d.organicSessions!=null?d.organicSessions.toLocaleString()+"K":"—"),d.organicSessionsDelta,"%","","GA4 — Session channel group = Organic Search.")}\n'
+         '    ${metricCard("Total sessions",(d.totalSessions!=null?d.totalSessions.toLocaleString()+"K":"—"),d.totalSessionsDelta,"%","","GA4 — Grand Total row across all channels.")}'),
         # UX-8: Remove "Why this matters" tab
         ('{id:"methodology",label:"Why this matters"},', ''),
         ('else if(activeTab==="methodology") tabContent = renderMethodology();', ''),
@@ -612,25 +618,33 @@ def _apply_template(block, cfg):
     return html
 
 
-def generate(client_config, T, G_data, A, S):
-    """Build dashboard. Returns (html, month_rows, results).
-
-    month_rows: list of (month_str, storage_dict) — store in score_runs.
-    results: dict keyed by month from score_bvi.compute().
-    """
-    cfg = dict(client_config)
-    brand_key = cfg["brand_key"]
-    cat = T["cat"]
+def _resolve_category_terms(cfg, brand_key, cat):
+    """Auto-detect primary/cat2/cat3 from Trends Export 2 if not already set on cfg."""
     cat_terms = [k for k in next(iter(cat.values())) if k != brand_key]
     means = {t: sum(cat[mo][t] for mo in cat) / len(cat) for t in cat_terms}
     sorted_terms = sorted(cat_terms, key=lambda t: means[t], reverse=True)
     cfg.setdefault("primary", sorted_terms[0] if sorted_terms else "Category")
     cfg.setdefault("cat2", sorted_terms[1] if len(sorted_terms) > 1 else cfg["primary"])
     cfg.setdefault("cat3", sorted_terms[2] if len(sorted_terms) > 2 else cfg["primary"])
+    return cfg
+
+
+def generate(client_config, T, G_data, A, S):
+    """Build dashboard. Returns (html, month_rows, results, resolved_config).
+
+    month_rows: list of (month_str, storage_dict) — store in score_runs.
+    results: dict keyed by month from score_bvi.compute().
+    resolved_config: client_config plus auto-detected primary/cat2/cat3 —
+        callers must persist THIS dict (not the original client_config) so
+        primary/cat2/cat3 survive into the clients table.
+    """
+    cfg = dict(client_config)
+    brand_key = cfg["brand_key"]
+    cfg = _resolve_category_terms(cfg, brand_key, T["cat"])
 
     block, month_rows, results = _build_data_block(cfg, T, G_data, A, S)
     html = _apply_template(block, cfg)
-    return html, month_rows, results
+    return html, month_rows, results, cfg
 
 
 def generate_from_stored_rows(client_config, stored_rows):
