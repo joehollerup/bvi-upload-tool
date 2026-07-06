@@ -17,6 +17,7 @@ import json
 from datetime import datetime
 
 from flask import Flask, request, Response, redirect, url_for
+from markupsafe import escape
 
 import parse_trends
 import parse_gsc
@@ -741,13 +742,26 @@ def _save(file_obj, tmpdir, name):
     return path
 
 
+def _log_uploaded_files():
+    """Print every uploaded field/filename for this request — debugging aid."""
+    f = request.files
+    print(f"[UPLOAD] fields present: {list(f.keys())}", file=sys.stderr)
+    for field in f:
+        for file_obj in f.getlist(field):
+            name = file_obj.filename or "(empty)"
+            print(f"[UPLOAD]   field={field!r} filename={name!r}", file=sys.stderr)
+
+
 def _parse_uploads(tmpdir):
     """Save and parse all uploaded files from the current request.
 
-    Returns (T, brand_key, rivals, G_data, A, S).
-    Raises ValueError with a user-facing message on missing/invalid files.
+    Returns (T, brand_key, rivals, G_data, A, S, ga4_warnings).
+    ga4_warnings is a list of user-facing strings describing any GA4 file
+    that was uploaded but rejected by the parser (empty list if none).
+    Raises ValueError with a user-facing message on missing/invalid required files.
     """
     f = request.files
+    _log_uploaded_files()
 
     missing = []
     if not f.get("gsc_zip") or f["gsc_zip"].filename == "":
@@ -766,7 +780,7 @@ def _parse_uploads(tmpdir):
     ga4_paths = []
     for i, ga4_file in enumerate(f.getlist("ga4_files")):
         if ga4_file and ga4_file.filename:
-            ga4_paths.append(_save(ga4_file, tmpdir, f"ga4_{i}.csv"))
+            ga4_paths.append((ga4_file.filename, _save(ga4_file, tmpdir, f"ga4_{i}.csv")))
 
     ig_path = None
     if f.get("instagram") and f["instagram"].filename:
@@ -793,11 +807,18 @@ def _parse_uploads(tmpdir):
         raise ValueError(f"Failed to parse GSC ZIP: {e}")
 
     A = {}
+    ga4_warnings = []
     if ga4_paths:
-        try:
-            A = parse_ga4.load_from(ga4_paths)
-        except Exception as e:
-            raise ValueError(f"Failed to parse GA4 CSV(s): {e}")
+        original_names = {path: name for name, path in ga4_paths}
+        A, diagnostics = parse_ga4.load_from_with_diagnostics(
+            [path for _, path in ga4_paths], verbose=True
+        )
+        for d in diagnostics:
+            print(f"[UPLOAD] GA4 {d['status']}: {original_names.get(d['path'], d['path'])}"
+                  + (f" — {d['reason']}" if d["reason"] else ""), file=sys.stderr)
+            if d["status"] == "rejected":
+                display_name = original_names.get(d["path"], d["path"])
+                ga4_warnings.append(f"{display_name}: {d['reason']}")
 
     S = {}
     if ig_path or tt_path:
@@ -806,12 +827,12 @@ def _parse_uploads(tmpdir):
         except Exception as e:
             raise ValueError(f"Failed to parse social file(s): {e}")
 
-    return T, brand_key, rivals, G_data, A, S
+    return T, brand_key, rivals, G_data, A, S, ga4_warnings
 
 
 def _score(tmpdir):
     try:
-        T, brand_key, rivals, G_data, A, S = _parse_uploads(tmpdir)
+        T, brand_key, rivals, G_data, A, S, ga4_warnings = _parse_uploads(tmpdir)
     except ValueError as e:
         return render_form(error=str(e)), 400
 
@@ -847,7 +868,8 @@ def _score(tmpdir):
         print(tb, file=sys.stderr)
         return Response(html, mimetype="text/html")
 
-    return redirect(url_for("client_detail", client_id=client_id))
+    ga4_warning = " · ".join(ga4_warnings) if ga4_warnings else None
+    return redirect(url_for("client_detail", client_id=client_id, ga4_warning=ga4_warning))
 
 
 @app.route("/client/<int:client_id>")
@@ -877,6 +899,30 @@ def client_detail(client_id):
             error=f"Dashboard reconstruction failed: {e}<br>"
                   f"<code style='font-size:11px;white-space:pre-wrap'>{tb}</code>"
         ), 500
+
+    # Surface any GA4 rejection reason passed through the redirect — avoids the
+    # "silently shows No data" failure mode when an uploaded GA4 file was skipped.
+    ga4_warning = request.args.get("ga4_warning")
+    if ga4_warning:
+        warning_css = (
+            "<style>"
+            "#_fp_warning{position:fixed;top:16px;left:50%;transform:translateX(-50%);"
+            "z-index:99999;max-width:640px;background:#FFF3E0;border:0.5px solid #F0C674;"
+            "border-radius:8px;padding:12px 18px;font-family:Inter,-apple-system,sans-serif;"
+            "font-size:12px;color:#7A5A0A;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.12)}"
+            "#_fp_warning strong{display:block;font-size:11px;text-transform:uppercase;"
+            "letter-spacing:.04em;margin-bottom:4px}"
+            "#_fp_warning button{position:absolute;top:8px;right:10px;border:none;"
+            "background:transparent;font-size:14px;color:#7A5A0A;cursor:pointer;opacity:.6}"
+            "</style>"
+        )
+        warning_html = (
+            f'<div id="_fp_warning">'
+            f'<button onclick="this.parentElement.remove()">×</button>'
+            f'<strong>GA4 file skipped</strong>{escape(ga4_warning)}'
+            f'</div>'
+        )
+        html = html.replace("</body>", warning_css + warning_html + "</body>", 1)
 
     # Inject floating admin buttons — avoids z-index battles with the dashboard's own nav
     fab_css = (
@@ -1184,7 +1230,7 @@ def update_score(client_id):
 
 def _update_score(client_id, existing_config, tmpdir):
     try:
-        T, brand_key, rivals, G_data, A, S = _parse_uploads(tmpdir)
+        T, brand_key, rivals, G_data, A, S, ga4_warnings = _parse_uploads(tmpdir)
     except ValueError as e:
         return render_update_form(existing_config, client_id, error=str(e)), 400
 
@@ -1222,7 +1268,8 @@ def _update_score(client_id, existing_config, tmpdir):
         tb = traceback.format_exc()
         print(tb, file=sys.stderr)
 
-    return redirect(url_for("client_detail", client_id=client_id))
+    ga4_warning = " · ".join(ga4_warnings) if ga4_warnings else None
+    return redirect(url_for("client_detail", client_id=client_id, ga4_warning=ga4_warning))
 
 
 if __name__ == "__main__":
