@@ -108,20 +108,21 @@ def _build_data_block(cfg, T, G_data, A, S):
         ctr_d = (ctr[m] - ctr[pm]) if m in ctr and pm in ctr else None
         pos_d = (position[m] - position[pm]) if m in position and pm in position else None
 
-        # Trends
-        kg = comp[m][brand_key]
+        # Trends — this month may have no Trends data even if other sources do
+        has_comp = m in comp
+        kg = comp[m][brand_key] if has_comp else None
         kg_prev = comp[pm][brand_key] if pm in comp else None
-        ti_d = (kg - kg_prev) if kg_prev is not None else None
+        ti_d = (kg - kg_prev) if kg is not None and kg_prev is not None else None
         yoy = None
-        if i >= 12:
+        if has_comp and i >= 12:
             back_idx = comp_months.index(m) - 12 if m in comp_months and comp_months.index(m) >= 12 else None
             if back_idx is not None:
                 back = comp_months[back_idx]
                 yoy = mom_pct(kg, comp[back][brand_key])
 
-        share = kg / sum(comp[m].values()) * 100 if comp[m] else 0
+        share = (kg / sum(comp[m].values()) * 100) if has_comp and comp[m] else None
         share_prev = comp[pm][brand_key] / sum(comp[pm].values()) * 100 if pm in comp and comp[pm] else None
-        share_d = (share - share_prev) if share_prev is not None else None
+        share_d = (share - share_prev) if share is not None and share_prev is not None else None
 
         # GA4
         has_ga = m in A
@@ -159,15 +160,22 @@ def _build_data_block(cfg, T, G_data, A, S):
                 f"Branded impressions {fmt_signed(impr_d)}% MoM, "
                 f"branded clicks {fmt_signed(clk_d)}% MoM, "
                 f"Trends index {fmt_signed(ti_d, pts=True)}.")
-        catctx = (f"Brand Trends index ({kg}) vs. primary category \"{primary}\" "
-                  f"({cat_primary}). Rising tide {'active' if rising else 'not detected'}.")
+        kg_disp = kg if kg is not None else "—"
+        cat_primary_disp = cat_primary if cat_primary is not None else "—"
+        catctx = (f"Brand Trends index ({kg_disp}) vs. primary category \"{primary}\" "
+                  f"({cat_primary_disp}). Rising tide {'active' if rising else 'not detected'}."
+                  if has_comp or m in cat else
+                  "No Trends data for this month.")
 
         # Nearest competitor
         rival_idx = {r: comp[m][r] for r in rivals if r in comp.get(m, {})}
         nearest = max(rival_idx, key=rival_idx.get) if rival_idx else (rivals[0] if rivals else "")
-        nval = comp[m].get(nearest, 0)
+        nval = comp.get(m, {}).get(nearest, 0)
+        share_disp = round(share) if share is not None else "—"
         compshift = (f"Nearest competitor {nearest} at index {nval}; "
-                     f"{brand_key} brand share {round(share)}% of tracked Trends.")
+                     f"{brand_key} brand share {share_disp}% of tracked Trends."
+                     if has_comp else
+                     "No Trends data for this month — competitive position unavailable.")
 
         prior_bvi = (round(results[pm]["bvi_score"])
                      if pm in results and results[pm].get("bvi_score") is not None else None)
@@ -267,9 +275,9 @@ def _build_data_block(cfg, T, G_data, A, S):
         rows.append((m, obj, storage))
 
     months_lbls = ",".join(f'"{label(m)}"' for m, _, _s in rows)
-    cat_p = ",".join(str(cat[m].get(primary, "null")) for m, _, _s in rows)
-    cat_2 = ",".join(str(cat[m].get(cat2, "null")) if cat2 else "null" for m, _, _s in rows)
-    cat_3 = ",".join(str(cat[m].get(cat3, "null")) if cat3 else "null" for m, _, _s in rows)
+    cat_p = ",".join(str(cat.get(m, {}).get(primary, "null")) for m, _, _s in rows)
+    cat_2 = ",".join(str(cat.get(m, {}).get(cat2, "null")) if cat2 else "null" for m, _, _s in rows)
+    cat_3 = ",".join(str(cat.get(m, {}).get(cat3, "null")) if cat3 else "null" for m, _, _s in rows)
     raw_js = ",\n  ".join(obj for _, obj, _s in rows)
 
     block = (
