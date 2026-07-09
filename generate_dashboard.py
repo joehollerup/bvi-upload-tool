@@ -349,6 +349,27 @@ def _get_repl_list(cfg):
         ('${d.directPct}%', '${d.directPct!=null?d.directPct+"%":"—"}'),
         ('${d.brandedOrganic}%', '${d.brandedOrganic!=null?d.brandedOrganic+"%":"—"}'),
         ('${br.vol}K', '${br.vol!=null?br.vol+"K":"—"}'),
+        # BUG: renderSearch crashed on d.impressions/d.clicks.toLocaleString() when
+        # a month has GSC/Trends data but no branded GSC metrics (or vice versa)
+        ('d.impressions.toLocaleString()+"K"',
+         '(d.impressions!=null?d.impressions.toLocaleString()+"K":"—")'),
+        ('d.clicks.toLocaleString()+"K"',
+         '(d.clicks!=null?d.clicks.toLocaleString()+"K":"—")'),
+        # Same pattern in renderListening/renderPaid/renderAwareness — these
+        # dimensions are always null in Bronze tier today, but guard anyway
+        # so a future tier unlock can't hit the same crash.
+        ('d.mentionVol.toLocaleString()',
+         '(d.mentionVol!=null?d.mentionVol.toLocaleString():"—")'),
+        ('d.earnedReach.toLocaleString()+"K"',
+         '(d.earnedReach!=null?d.earnedReach.toLocaleString()+"K":"—")'),
+        ('d.influencerReach.toLocaleString()+"K"',
+         '(d.influencerReach!=null?d.influencerReach.toLocaleString()+"K":"—")'),
+        ('survey.sampleSize.toLocaleString()',
+         '(survey.sampleSize!=null?survey.sampleSize.toLocaleString():"—")'),
+        # Cleanup: the bare d.reach guard above leaves a stray "—K" when reach is
+        # null (guard wraps toLocaleString() but the +"K" suffix is outside it).
+        ('(d.reach!=null?d.reach.toLocaleString():"—")+"K"',
+         '(d.reach!=null?d.reach.toLocaleString()+"K":"—")'),
         # BUG-2: Add "Total sessions" metric card to Digital tab
         ('${metricCard("Total organic sessions",(d.organicSessions!=null?d.organicSessions.toLocaleString()+"K":"—"),d.organicSessionsDelta,"%","","GA4 — Session channel group = Organic Search.")}',
          '${metricCard("Total organic sessions",(d.organicSessions!=null?d.organicSessions.toLocaleString()+"K":"—"),d.organicSessionsDelta,"%","","GA4 — Session channel group = Organic Search.")}\n'
