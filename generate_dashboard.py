@@ -174,8 +174,8 @@ def _build_data_block(cfg, T, G_data, A, S):
         # Narratives
         bvi_disp = bvi if bvi is not None else "—"
         what = (f"BVI {bvi_disp} ({momentum}). "
-                f"Branded impressions {fmt_signed(impr_d, suf='%')} MoM, "
-                f"branded clicks {fmt_signed(clk_d, suf='%')} MoM, "
+                f"Branded impressions {fmt_signed(impr_d, suf='%')} vs baseline, "
+                f"branded clicks {fmt_signed(clk_d, suf='%')} vs baseline, "
                 f"Trends index {fmt_signed(ti_d, pts=True)}.")
         kg_disp = kg if kg is not None else "—"
         cat_primary_disp = cat_primary if cat_primary is not None else "—"
@@ -220,18 +220,18 @@ def _build_data_block(cfg, T, G_data, A, S):
         if bvi_delta is None:
             move = ""
         elif bvi_delta > 0:
-            move = f", up {bvi_delta} MoM"
+            move = f", up {bvi_delta} from baseline"
         elif bvi_delta < 0:
-            move = f", down {abs(bvi_delta)} MoM"
+            move = f", down {abs(bvi_delta)} from baseline"
         else:
-            move = ", unchanged MoM"
+            move = ", unchanged vs baseline"
         why = (f"BVI {bvi_disp}{move}. "
                f"Movement led by {DLAB.get(driver, driver)} ({DETAIL.get(driver, '')}).")
         if rising:
             why += (f' Rising-tide flag active — "{primary}" moved with the brand, '
                     f"so part of the shift is category-wide, not brand-specific.")
 
-        delta_str = (f" ({'+' if bvi_delta and bvi_delta >= 0 else ''}{bvi_delta} pts MoM)"
+        delta_str = (f" ({'+' if bvi_delta and bvi_delta >= 0 else ''}{bvi_delta} pts vs baseline)"
                      if bvi_delta is not None else "")
         if momentum == "Declining":
             reco = (f"BVI slipped{delta_str} — treat as a watch month and confirm the dip "
@@ -437,17 +437,17 @@ def _get_repl_list(cfg):
          'style="width:14px;height:14px;border-radius:50%;background:rgba(171,171,171,.25);'
          'display:inline-flex;align-items:center;justify-content:center;'
          'font-size:10px;color:#ABABAB;cursor:pointer;font-weight:700">?</span>'),
-        # UX-5a: MoM text per dimension
+        # UX-5a: vs-baseline text per dimension
         ('const factors = info.factors || [];',
          'const factors = info.factors || [];\n'
          '  const momText = {'
-         'search:d.impressionsDelta!=null?(d.impressionsDelta>0?"+":"")+d.impressionsDelta+"% MoM":null,'
-         'digital:d.directPctDelta!=null?(d.directPctDelta>0?"+":"")+d.directPctDelta+" pts MoM":null,'
-         'social:d.engagementRateDelta!=null?((d.engagementRateDelta>0?"+":"")+parseFloat(d.engagementRateDelta).toFixed(1)+" pts MoM"):null,'
-         'competitive:d.brandShareDelta!=null?(d.brandShareDelta>0?"+":"")+d.brandShareDelta+" pts MoM":null,'
-         'category:prev&&d.catTrends!=null&&prev.catTrends!=null?((d.catTrends-prev.catTrends>=0?"+":"")+(d.catTrends-prev.catTrends)+" pts MoM"):null'
+         'search:d.impressionsDelta!=null?(d.impressionsDelta>0?"+":"")+d.impressionsDelta+"% vs baseline":null,'
+         'digital:d.directPctDelta!=null?(d.directPctDelta>0?"+":"")+d.directPctDelta+" pts vs baseline":null,'
+         'social:d.engagementRateDelta!=null?((d.engagementRateDelta>0?"+":"")+parseFloat(d.engagementRateDelta).toFixed(1)+" pts vs baseline"):null,'
+         'competitive:d.brandShareDelta!=null?(d.brandShareDelta>0?"+":"")+d.brandShareDelta+" pts vs baseline":null,'
+         'category:prev&&d.catTrends!=null&&prev.catTrends!=null?((d.catTrends-prev.catTrends>=0?"+":"")+(d.catTrends-prev.catTrends)+" pts vs baseline"):null'
          '}[dimId]||null;'),
-        # UX-5b: append MoM to status badge
+        # UX-5b: append vs-baseline text to status badge
         ('white-space:nowrap">${info.status}</span>',
          'white-space:nowrap">${info.status}${momText?" "+momText:""}</span>'),
         # UX-6a–c: Category chart line colors
