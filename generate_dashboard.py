@@ -82,9 +82,21 @@ def _build_data_block(cfg, T, G_data, A, S):
     position = G_data.get("position", {})
     ctr = G_data.get("ctr", {})
 
+    # score_bvi v2.1 reads GSC average position from G["months"][m]["position"],
+    # but parse_gsc.load_from() (unchanged parser) returns it as a separate
+    # top-level G_data["position"] dict. Build a scoring-only G view that nests
+    # it where the engine expects it, without touching the parser or G_data.
+    G_for_scoring = {
+        **G_data,
+        "months": {
+            mo: ({**vals, "position": position[mo]} if mo in position else dict(vals))
+            for mo, vals in gsc.items()
+        },
+    }
+
     # Score results keyed by month
     results = {r["month"]: r for r in score_bvi.compute(
-        brand_key=brand_key, T=T, G=G_data, A=A, S=S
+        brand_key=brand_key, T=T, G=G_for_scoring, A=A, S=S
     )}
 
     comp_months = sorted(comp)
@@ -143,12 +155,14 @@ def _build_data_block(cfg, T, G_data, A, S):
 
         # Category
         cat_primary = cat[m][primary] if m in cat else None
-        rising = False
-        if r.get("dimensions", {}).get("Category", {}).get("signals", {}).get("rising_tide", {}).get("value"):
-            rising = True
+        # v2.1: rising_tide is a top-level boolean on the result, not a nested
+        # Category signal (the old engine scored rising-tide as a signal itself).
+        rising = bool(r.get("rising_tide", False))
 
         bvi = round(r["bvi_score"]) if r.get("bvi_score") is not None else None
-        momentum = r.get("momentum", "—")
+        # v2.1: "badge" replaces "momentum" (Improving/Watch/Declining/Stable/New/-
+        # instead of Rising/Declining/Stable).
+        momentum = r.get("badge", "—")
 
         # Competitor slots (sm=rivals[0], car=rivals[1], ted=rivals[2])
         sm_v = comp[m][rivals[0]] if m in comp and len(rivals) > 0 else None
@@ -181,9 +195,11 @@ def _build_data_block(cfg, T, G_data, A, S):
                      if pm in results and results[pm].get("bvi_score") is not None else None)
         bvi_delta = (bvi - prior_bvi) if (bvi is not None and prior_bvi is not None) else None
 
-        dscore = {d: r["dimensions"][d]["score"] for d in
+        # v2.1: dimensions[d]["score"] (0-100, neutral=55) is now
+        # dimensions[d]["contribution"] (BVI points, neutral=0).
+        dscore = {d: r["dimensions"][d]["contribution"] for d in
                   ("Search", "Social", "Competitive", "Category")
-                  if r.get("dimensions", {}).get(d, {}).get("score") is not None}
+                  if r.get("dimensions", {}).get(d, {}).get("contribution") is not None}
         DETAIL = {
             "Search": f"branded impressions {sgn(impr_d)}%, Trends index {sgn(ti_d, suf='pts')}",
             "Social": f"engagement rate {sgn(er_d, 2, 'pts')}, follower growth {sgn(gr_d, 2, 'pts')}",
@@ -197,7 +213,7 @@ def _build_data_block(cfg, T, G_data, A, S):
         elif bvi_delta is not None and bvi_delta < 0:
             driver = min(dscore, key=lambda k: dscore[k])
         else:
-            driver = max(dscore, key=lambda k: abs(dscore[k] - 55))
+            driver = max(dscore, key=lambda k: abs(dscore[k]))
         if bvi_delta is None:
             move = ""
         elif bvi_delta > 0:
@@ -218,7 +234,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             reco = (f"BVI slipped{delta_str} — treat as a watch month and confirm the dip "
                     f"persists before changing strategy. "
                     f"{DLAB.get(driver, driver)} was the main drag ({DETAIL.get(driver, '')}).")
-        elif momentum == "Rising":
+        elif momentum == "Improving":
             reco = (f"Momentum positive{delta_str}. "
                     f"{DLAB.get(driver, driver)} led the move ({DETAIL.get(driver, '')}) — "
                     f"reinforce this channel and feature in client reporting.")

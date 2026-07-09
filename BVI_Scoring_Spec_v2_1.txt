@@ -1,0 +1,771 @@
+===================================================================
+BRAND VELOCITY INDEX (BVI) - SCORING SPECIFICATION v2.1
+Power Digital Marketing - Confidential
+Supersedes v1.2 and v2.0. Baseline-relative, season-neutral scoring.
+===================================================================
+
+This document governs all BVI score calculations. Any deviation from
+this spec in code or tooling is a bug, not a feature. Changes require a
+version increment and internal sign-off.
+
+v2.0 replaced month-over-month (MoM) scoring with baseline-relative
+scoring. v2.1 fixes a seasonality flaw in v2.0: it moves the baseline
+onto the season-neutral full-cycle mean (2.5) and adds a seasonal-
+adjustment layer for the volume signals (0.6, 3.2). The question the BVI
+answers is "how far is the brand above or below its own starting point,
+after removing the part of the movement the category and the season
+explain." Inputs, metrics, and CSV structure are unchanged. Only the
+scoring lens changes. Every element of v1.2 is carried forward.
+
+STATE OF THIS SPEC: implementation-ready. One input is pending - the
+per-month seasonal coefficients for the volume signals, which come from a
+pooled fashion-client data pull (see Section 13). The engine is built to
+run correctly without them (seasonal layer defaults to a no-op) and to
+improve when they are loaded, with no logic change. Everything else is
+final.
+
+
+
+-------------------------------------------------------------------
+SECTION 0: DECISIONS OF RECORD
+-------------------------------------------------------------------
+The following were open decisions during design. All are now settled and
+implemented. Each records the alternative that was considered and rejected,
+so the reasoning is auditable. Nothing in this section is outstanding.
+
+0.1 BASELINE = SEASON-NEUTRAL FULL-CYCLE MEAN. SETTLED (revised from v2.0).
+    The reference anchor is the mean of the client's first full cycle of
+    backfill (up to 12 months), locked once a full cycle exists. Every month
+    with data is scored as a deviation from that reference; no month is
+    excluded.
+    Chosen over v2.0's "first 3 months" because a 3-month anchor sits inside
+    one season: if those months are a Q4 peak the whole series reads as
+    decline, and if they are a Q1 trough it reads as inflated. A full-cycle
+    mean contains one of every month, so the reference itself is season-
+    neutral and cannot be a Q4 or Q1 anchor. It also uses all backfill rather
+    than a quarter of it (steadier, less anomaly-prone) and scores all 12
+    backfill months on day one rather than 9.
+    Rejected: fixed first-N-months (seasonal anchor bias, the flaw above);
+    expanding baseline (score moves because the reference moved).
+    Immutability: a metric with a full cycle locks its baseline and never
+    recomputes. A metric with less than a full cycle (typically social at
+    onboarding, 90 days) cannot have a season-neutral reference yet; its
+    baseline is provisional and expands until it reaches a full cycle, then
+    locks. Flagged PROVISIONAL_BASELINE until then (6.1). See 2.5.
+    IMPORTANT INTERIM LIMIT: a season-neutral baseline removes ANCHOR bias
+    immediately, but a scored month still carries its own seasonal component
+    (a November still reads high for being November) until the seasonal-
+    adjustment layer is populated (0.6). See 3.2 and Section 13.
+
+0.2 CATEGORY ENTERS IN TWO DISTINCT PLACES. SETTLED.
+    (a) As the deseasonalizing reference applied to ONE signal only:
+        Search Demand's brand Trends index (4.1 signal C).
+    (b) As its own scored dimension, Category Context, redefined to
+        measure share-of-category-attention and brand-vs-category gap
+        (4.5) - relative quantities that can move independently of the
+        deseasonalized growth in (a).
+    Chosen to keep category prominent (its own dimension) while also
+    removing category seasonality from search interest. The two uses carry
+    distinct math, so they are not the same measurement.
+    Rejected: category as deseasonalizer only (would gut the dimension);
+    category in the dimension only (would leave search seasonal).
+    Residual correlation between (a) and (b) is a post-launch validation
+    item, not a blocker (Section 11.3). See 4.1 and 4.5.
+
+0.3 RISING TIDE NO LONGER APPLIES A 0.90 MULTIPLIER. SETTLED.
+    In v1.2 rising tide multiplied the Search Trends score by 0.90.
+    Under v2.0 the category is subtracted from the Search Trends signal
+    continuously (3.2, 4.1), which is the precise form of the same
+    correction. A multiplier on top would correct for the category twice
+    and over-penalize a brand growing while its category is also healthy.
+    Rising tide is retained as a displayed flag and as a badge modifier
+    (a category-driven gain reads as Watch, not Improving), but not as a
+    score multiplier. This is the one behavioral change from v1.2 and is
+    deliberate. See 4.5, 6.4.
+
+0.4 SMALL-BASE THRESHOLDS. SETTLED as committed launch values.
+    The floors that decide when a tiny baseline value is scored as a ratio,
+    scored in point-mode, or held display-only (4.6) are set to committed
+    launch values. They carry a documented retune trigger (any real client
+    that trips SMALL_BASE), not an open decision. Low risk for established
+    fashion brands. See 4.6 and 3.6.
+
+0.5 CALIBRATION CONSTANTS. SETTLED as committed launch calibration.
+    The sensitivities that convert movement into BVI points (Section 3) are
+    committed launch values, set by a coherence pass on the mapping (3.6):
+    a brand growing a broad ~15% above baseline, net of category, lands
+    near BVI 63; ~30% near the low 70s; exceptional growth reaches the low
+    80s; decline is symmetric. Score direction and ordering are correct at
+    these values; absolute levels are the launch calibration and refine
+    against real client history via the retune trigger in 3.6. This is the
+    finished state achievable before client data exists; it is not an open
+    decision.
+
+0.6 SEASONAL-ADJUSTMENT LAYER. SETTLED design; coefficients PENDING data.
+    A season-neutral baseline (0.1) removes anchor bias but not each month's
+    own seasonal component. The volume signals (branded impressions, branded
+    clicks, direct sessions, organic sessions, organic reach, follower growth)
+    have no category comparator and so cannot be deseasonalized the way search
+    interest is. The fix is a seasonal-index table that records, per fashion
+    sub-vertical and calendar month, how far each volume family typically runs
+    above or below its annual mean; the engine subtracts that expected
+    seasonal level so only movement BEYOND the seasonal norm scores (3.2).
+    Why the coefficients are pending: a seasonal shape cannot be estimated
+    from one client's single year (12 points cannot separate "November is
+    always high" from "the brand grew"). It must be pooled across many fashion
+    clients. That is the data pull described in Section 13.
+    Engine state: the layer is fully built. The table (SEASONAL_INDEX) is
+    empty at launch and is a documented no-op when empty, so the engine runs
+    correctly today and improves when the table is loaded, with no logic
+    change. See 3.2, Section 13.
+
+
+-------------------------------------------------------------------
+SECTION 1: CORE PRINCIPLES
+-------------------------------------------------------------------
+
+1.1 RELATIVE SCORING - NON-NEGOTIABLE (carried from v1.2, re-based)
+    All scoring is relative, never absolute. v1.2 scored relative to the
+    prior month. v2.0 scores relative to a fixed baseline and, for search
+    interest, relative to the category. Size-agnosticism is preserved:
+    every ratio metric is scored as a log-ratio to its own baseline, so a
+    brand with 10K branded impressions and one with 2M are compared on the
+    same growth scale. Absolute values are context. Position vs baseline,
+    net of category, is health.
+
+1.2 DETERMINISTIC CALCULATION (carried, reaffirmed)
+    Given the same input files and the same constants in Section 3, the
+    BVI is identical on every run, every model version, every date. The
+    baseline is defined by the client's earliest months, which are
+    immutable (history is append-only), so appending later months never
+    changes it. The only estimated quantity is per-signal volatility
+    (6.3), which is a deterministic standard deviation and feeds ONLY the
+    uncertainty band and the badge - never the headline number. Claude API
+    is called once per month for narrative only (Section 7). Claude does
+    not calculate, override, or influence any score.
+
+1.3 DATA HONESTY (carried, unchanged)
+    Missing data is excluded, never estimated, filled, or approximated.
+    An excluded signal drops out and the remaining weights renormalize.
+    Every exclusion is flagged visibly.
+
+1.4 SIGNAL COMPOSITION INTEGRITY (carried, re-based)
+    A BVI is comparable across months when the same dimensions are active.
+    Because all scored months share one fixed baseline, they are directly
+    comparable by construction. When the active set changes (for example
+    social maturing into the score), the month is flagged SIGNAL_CHANGE
+    and the MoM delta is withheld. A score should move because the brand
+    moved, not because coverage changed.
+
+1.5 REALISTIC SCORE RANGE (carried, re-based)
+    50 is neutral: the brand sits at its baseline, net of category.
+    A healthy brand growing beyond its baseline scores in the 45-85 band.
+    Below 45 means sustained decline relative to baseline across
+    dimensions. Above 85 is rare and requires strong brand-specific growth
+    across dimensions. The range emerges from the Section 3 sensitivities
+    and the per-signal cap; it is not hard-clamped at 85.
+
+1.6 TWO-LAYER DESIGN (new; see Section 10)
+    The engine computes in log-growth and percentage-point space and
+    deseasonalizes against the category. The surface (dashboard, narrative)
+    restates that in plain language. The mapping between the layers is the
+    fixed set of constants in Section 3 and is fully documented here so
+    anyone may dig into it.
+
+
+-------------------------------------------------------------------
+SECTION 2: DIMENSIONS, WEIGHTS, DATA SOURCES, BASELINE
+-------------------------------------------------------------------
+
+2.1 BRONZE TIER (base - always active if data available)
+    Dimension              Weight    Source
+    ---------------------------------------------------------------
+    Search Demand          22%       GSC (ZIP) + Google Trends Export 1
+    Digital Presence       22%       GA4 Traffic Acquisition CSV
+    Organic Social         14%       Instagram + TikTok (manual entry)
+    Competitive Position   14%       Google Trends Export 1
+    Category Context        8%       Google Trends Export 2 (+ SEMrush display)
+    ---------------------------------------------------------------
+    Bronze subtotal        80%
+
+2.2 SILVER TIER (adds to Bronze - future build)
+    Social Listening       10%       Meltwater
+    Paid Brand Efficiency   5%       Google Ads + Meta Ads
+
+2.3 GOLD TIER (adds to Silver - future build)
+    Direct Awareness        5%       PDM Survey (Pollfish)
+
+2.4 WEIGHT NORMALIZATION (carried, unchanged in principle)
+    Weights assume all dimensions in the tier are active. Any dimension
+    excluded for missing data or an unfinished baseline drops out, and the
+    remaining active-dimension weights renormalize to sum to 100%.
+    The same renormalization applies WITHIN a dimension across its signals:
+    if a signal is excluded (missing, or small-base display-only), the
+    remaining signals in that dimension renormalize.
+
+2.5 BASELINE DEFINITION (season-neutral full-cycle mean; see 0.1)
+    For each metric, the baseline is the arithmetic mean of the metric's
+    first full cycle of data, BASELINE_CYCLE months (default 12). Because a
+    full year contains every season, the reference is season-neutral. Every
+    month that carries data is scored as a deviation from this reference;
+    no month is excluded from scoring.
+    Locking: once BASELINE_CYCLE months exist for a metric, its baseline
+    locks and never recomputes (determinism, 1.2). A metric with fewer than
+    BASELINE_CYCLE months cannot be season-neutral yet; its baseline is the
+    mean of what exists and expands with each new month until a full cycle is
+    reached, then locks. Flagged PROVISIONAL_BASELINE until locked (6.1).
+
+    Consequences, stated plainly:
+    - GSC / Trends / GA4 (12 months at onboarding): baseline locks at
+      onboarding and all 12 months score on day one. No baseline-period
+      exclusion, no method seam.
+    - Organic Social (90 days at onboarding): baseline is the 3-month mean,
+      provisional, and expands monthly until it reaches a full cycle (about
+      nine months of live tracking later), then locks. Social scores from its
+      first month but carries PROVISIONAL_BASELINE and a wider uncertainty
+      band until locked, because a sub-cycle baseline is not season-neutral.
+      The seasonal-adjustment layer (0.6) reduces this gap once loaded.
+    - The interim seasonality limit from 0.1 applies to every metric until
+      the seasonal-adjustment layer is loaded: the season-neutral baseline
+      removes anchor bias, but a scored month still carries its own seasonal
+      component. Read trajectory over a full cycle, not single months, in the
+      interim (3.2, Section 13).
+
+
+-------------------------------------------------------------------
+SECTION 3: MOVEMENT-TO-SCORE MAPPING (replaces v1.2 Section 3 scales)
+-------------------------------------------------------------------
+v1.2 used lookup tables that mapped a MoM change to a score, then averaged
+those scores. v2.0 removes the tables for two reasons: they assumed every
+metric has the same natural step size (false), and averaging the outputs of
+a nonlinear table has no clean interpretation. v2.0 measures each signal's
+movement against its baseline, converts movement to BVI points with a
+single linear sensitivity, assembles the composite, and applies the range
+once. This is the engine layer of the two-layer design (1.6, Section 10).
+
+3.1 MOVEMENT, BY METRIC FAMILY
+    Ratio metrics (impressions, clicks, Trends index, sessions, reach,
+      follower growth): movement = ln(value / baseline). Zero means at
+      baseline. This is scale-free, so it is comparable across brands and
+      across the two Trends queries despite their different normalization.
+    Percentage-point metrics (direct % of sessions, engagement rate,
+      brand share, gap, category share): movement = value - baseline, in
+      points.
+    Position (GSC average position, lower is better): movement =
+      baseline_position - current_position, so improvement is positive.
+
+3.2 DESEASONALIZATION - TWO MECHANISMS
+    (a) CATEGORY SUBTRACTION (search interest; see 0.2). For the Search
+        Demand brand Trends index signal only, subtract the category's own
+        baseline-relative movement:
+            brand_specific = ln(brand/brand_base) - ln(category/category_base)
+        This removes the shared category component continuously and is the
+        generalization of v1.2 rising tide from a binary flag into the method.
+        Applied to exactly one signal to avoid double counting with Category
+        Context (4.5).
+    (b) SEASONAL-INDEX SUBTRACTION (volume signals; see 0.6). The volume
+        signals have no category comparator, so each has its calendar-month
+        seasonal level subtracted in log space:
+            brand_specific = ln(value/baseline) - ln(seasonal_index[m][family])
+        seasonal_index is the typical level of that family in that calendar
+        month relative to its annual mean, by fashion sub-vertical.
+        Signals adjusted: branded impressions, branded clicks, direct
+        sessions, organic sessions, organic reach, follower growth rate.
+        NOT adjusted here: the search Trends index (uses mechanism (a)
+        instead - never both), and the point/share/gap/rate signals (direct
+        %, engagement rate, brand share, gap, category share), which are
+        near season-neutral by construction.
+        PENDING DATA: seasonal_index is empty at launch and the subtraction
+        is a no-op until it is populated from the pooled fashion pull. When
+        empty, a scored month carries its own seasonal component; read
+        trajectory over a full cycle, not single months (Section 13). No code
+        change is needed to activate it - only the table and, optionally, a
+        calibration retune (3.6).
+
+3.3 SIGNAL CONTRIBUTION
+    contribution = clamp( sensitivity_family * movement, -CAP, +CAP )
+    Sensitivities (COMMITTED LAUNCH CALIBRATION; see 3.6):
+        LOG_SENSITIVITY       130 BVI points per 1.0 log unit
+                              (ln(1.15) = 0.140 -> about 18 points before
+                              weighting)
+        PCT_POINT_SENSITIVITY   8 BVI points per 1 percentage point
+        POSITION_SENSITIVITY   20 BVI points per 1.0 position improved
+    CAP = 40 BVI points. This is the v1.2 large-swing cap (old 3.5) reborn.
+    A single viral month, campaign spike, or data anomaly cannot push one
+    signal past +/-40 points. The raw movement is still displayed; only its
+    contribution is capped. A capped signal raises LARGE_SWING (6.1).
+
+3.4 DIMENSION AND COMPOSITE ASSEMBLY
+    dimension_contribution = weighted mean of its scorable signals'
+      contributions, using the Section 4 intra-dimension weights,
+      renormalized over scorable signals (2.4).
+    composite_contribution = weighted mean of active dimensions'
+      contributions, using Section 2 dimension weights, renormalized over
+      active dimensions (2.4).
+    BVI = clamp( NEUTRAL + composite_contribution, 0, 100 ), NEUTRAL = 50.
+    The linear middle with a soft cap at the tails means assembling first
+    then mapping once is equivalent to the intuitive "average the signals"
+    read, except at the extremes where the cap protects the score. That
+    equivalence is what keeps the number explainable.
+
+3.5 EVERY MONTH IS SCORED (replaces v1.2 3.4 "first month = 55" and v2.0's
+    excluded baseline period)
+    Under the season-neutral full-cycle mean (2.5), the baseline is a value
+    computed from a whole cycle, not a set of months to exclude. Every month
+    that carries data is scored as a deviation from that value, including the
+    months that fed the baseline. There is no baseline-period exclusion and
+    no single-neutral-month rule. A metric whose baseline has not yet locked
+    (under a full cycle) still scores, carrying PROVISIONAL_BASELINE (6.1).
+
+3.6 CALIBRATION OF RECORD AND RETUNE TRIGGER
+    The Section 3.3 sensitivities were locked by a coherence pass on the
+    mapping, reasoning about the score that plausible growth magnitudes
+    produce. This is a check on the shape of the mapping, not a fit to any
+    client data and not a test against the demo dataset.
+    Intended behaviour at the committed values, for a brand moving a broad,
+    consistent amount above baseline net of category:
+        ~+15% growth  -> BVI near 63   (solid)
+        ~+30% growth  -> BVI low 70s   (strong)
+        ~+45% or more -> BVI low 80s   (exceptional; approaches the cap)
+        flat          -> BVI 50        (neutral, at baseline)
+        symmetric decline mirrors the above below 50.
+    This places the ordinary operating band at 45-85 with 50 neutral,
+    consistent with 1.5, and reserves 85+ for rare, broad strength.
+    RETUNE TRIGGER: recompute the sensitivities against observed movement
+    once the first cohort of real fashion clients has at least 6 scored
+    months each (this arrives with the same pooled data pull that supplies
+    the seasonal coefficients, Section 13). Until then these values stand.
+    Retuning changes absolute levels only; it does not change score
+    direction, ordering, or any logic in Sections 4-6. A retune is a version
+    increment with sign-off (per the spec header), not an ad-hoc edit.
+
+
+-------------------------------------------------------------------
+SECTION 4: DIMENSION SCORING RULES
+-------------------------------------------------------------------
+
+4.1 SEARCH DEMAND (22%)
+    Sources: GSC Chart.csv + Queries.csv + Google Trends Export 1.
+    Signals and intra weights:
+      A. Branded impressions vs baseline   35%   log-ratio (3.1)
+      B. Branded clicks vs baseline        25%   log-ratio (3.1)
+      C. Brand Trends index vs baseline    25%   log-ratio, DESEASONALIZED
+                                                 against category (3.2)
+      D. Average position vs baseline      15%   position (3.1)
+    Branded metrics methodology (carried unchanged from v1.2):
+      Branded clicks = Chart.csv total clicks x branded_share.
+      branded_share = branded clicks in Queries.csv / total clicks in
+      Queries.csv, computed once and applied to all months. Queries.csv is
+      an aggregate with no monthly breakdown; this is a consistent
+      approximation.
+    Signal D note: average position is read from GSC if the parser exposes
+      it. If it does not, D is excluded and A/B/C renormalize. Position is
+      never assumed present.
+    Missing data:
+      GSC missing: A, B, D excluded. Flag DATA_GAP_GSC.
+      Trends Export 1 missing: C excluded. Flag DATA_GAP_TRENDS1.
+      Both missing: dimension excluded.
+
+4.2 DIGITAL PRESENCE (22%)
+    Source: GA4 Traffic Acquisition CSV.
+    Signals and intra weights:
+      A. Direct sessions vs baseline       30%   log-ratio (3.1)
+      B. Direct % of total vs baseline     40%   percentage point (3.1)
+      C. Organic sessions vs baseline      30%   log-ratio (3.1)
+    Signal B is weighted highest because it is size-agnostic and the
+      clearest proxy for brand recall (carried from v1.2).
+    Total sessions denominator (carried unchanged): use the GA4 Grand
+      Total row as denominator for direct %. Never sum named channels.
+    No category comparator exists for Digital, so it is not deseasonalized
+      and carries wider uncertainty (6.3). This is a known limit.
+    Missing data: GA4 missing, dimension excluded. Flag DATA_GAP_GA4.
+
+4.3 ORGANIC SOCIAL (14%)
+    Sources: Instagram (manual entry) + TikTok (manual entry), v1.
+    Signals and intra weights:
+      A. Engagement rate vs baseline       45%   percentage point (3.1)
+      B. Follower growth rate vs baseline  30%   log-ratio (3.1)
+      C. Organic reach vs baseline         25%   log-ratio (3.1)
+    Signal A highest because reach and follower counts inflate on viral
+      one-offs; sustained engagement is harder to game (carried from v1.2).
+    Combination (carried): if both platforms present, average the two
+      platform values per signal before scoring. If one only, score on it
+      and flag SINGLE_PLATFORM_SOCIAL.
+    Baseline: with 90 days at onboarding, social is baseline-only until its
+      first post-onboarding month (2.5). Flag THIN_BASELINE at minimum
+      width. No category comparator, so wider uncertainty (6.3).
+    Missing data: no social entered, dimension excluded. Flag
+      DATA_GAP_SOCIAL. Partial handled by SINGLE_PLATFORM_SOCIAL.
+
+4.4 COMPETITIVE POSITION (14%)
+    Source: Google Trends Export 1.
+    Never score on absolute Trends index. Score share, share change, and
+      gap change - relative quantities (carried from v1.2).
+    Signals and intra weights:
+      A. Brand Trends share vs baseline    50%   percentage point (3.1)
+      B. Gap to nearest competitor vs base 30%   percentage point (3.1)
+      C. Brand Trends index vs baseline    20%   log-ratio (3.1), NOT
+                                                 deseasonalized (kept
+                                                 distinct from 4.1 C)
+    Calculations (carried):
+      share = brand_index / sum(all indices in query) x 100
+      nearest competitor = highest-index competitor (not the client)
+      gap = client_index - nearest_competitor_index (positive = ahead)
+    Competitive rank (#1..#4) is display context only; it does not affect
+      the score (carried).
+    Missing data: Trends Export 1 missing, dimension excluded. Flag
+      DATA_GAP_TRENDS1.
+
+4.5 CATEGORY CONTEXT (8%) - REDEFINED (ratify in 0.2)
+    Source: Google Trends Export 2 (brand vs category terms).
+      SEMrush category volume is display context only, not scored (carried).
+    Redefined to measure the brand's standing within its category over
+      time, which is distinct from the deseasonalized growth that enters
+      Search (4.1 C):
+      A. Brand-vs-primary-category gap vs baseline   60%  percentage point
+         gap = brand_index - primary_category_index (Export 2)
+      B. Brand share of category attention vs baseline 40% percentage point
+         share = brand_index / (brand_index + sum(category term indices)) x 100
+    Both can move when the brand is flat (for example the category falls,
+      so the gap widens and share rises), which is why they carry
+      information not already captured by 4.1 C.
+    Rising tide (continuous; replaces v1.2 binary flag and 0.90 multiplier,
+      ratify 0.3): computed on Export 2 brand vs primary category term.
+      RISING_TIDE = TRUE when brand and category move the same direction
+      AND the category move is at least 50% of the brand move in magnitude.
+      Effect: displayed as a flag (6.1) and used by the badge (6.4) so a
+      category-driven gain reads as Watch. No score multiplier.
+    Missing data: Trends Export 2 missing, dimension excluded and rising
+      tide defaults FALSE. Flag DATA_GAP_TRENDS2.
+
+4.6 SMALL-BASE HANDLING (generalizes v1.2 small-brand rules; see 0.4)
+    A near-zero baseline makes a ratio explode and makes volatility
+      unmeasurable. Committed launch floors (retune trigger in 0.4):
+      Trends index (0-100): FLOOR 5, HARD_MIN 2.
+      Counts (impressions, clicks, sessions, reach): FLOOR 100, HARD_MIN 20.
+    Rules per ratio metric, by baseline value:
+      baseline >= FLOOR:            score as log-ratio (normal).
+      HARD_MIN <= baseline < FLOOR: score in point-change mode instead of
+                                    ratio, so a small absolute move is not
+                                    amplified. Flag SMALL_BASE.
+      baseline < HARD_MIN:          not scored; display only. The signal is
+                                    excluded and its dimension renormalizes.
+                                    Flag SMALL_BASE.
+    This subsumes the v1.2 rules (old 4.1 Trends < 10; old 4.5 index 0-2).
+
+
+-------------------------------------------------------------------
+SECTION 5: SIGNAL COMPOSITION AND COMPARABILITY (carried, re-based)
+-------------------------------------------------------------------
+
+5.1 SIGNAL COMPOSITION RECORD
+    Every scored month records a sorted fingerprint of the dimension IDs
+    that contributed to that month's BVI. Example:
+    ["category","competitive","digital","search"].
+
+5.2 MoM DELTA COMPARABILITY
+    The displayed MoM delta is shown only when the current and prior scored
+    months have identical fingerprints. If they differ, show "-" and flag
+    SIGNAL_CHANGE with the added/removed dimensions. Note: the BVI level
+    itself is anchored to the same baseline throughout, so the levels are
+    comparable; the delta is withheld only to avoid reading a coverage
+    change as brand movement.
+
+5.3 A DIMENSION ENTERING FOR THE FIRST TIME
+    When a dimension first has data and first contributes in month N (for
+    example social, whose data begins after the heavy dimensions): it scores
+    normally from that month, carrying PROVISIONAL_BASELINE until it locks a
+    full cycle (2.5). The month's MoM delta is "-" and it is flagged
+    SIGNAL_CHANGE because the active-dimension set changed.
+
+5.4 A DIMENSION LEAVING (data gap in a previously active month)
+    Excluded from that month's BVI (Section 1.3 / 2.4), MoM delta "-",
+    flagged DATA_GAP for the source. Prevents a coverage-driven drop from
+    reading as brand decline.
+
+
+-------------------------------------------------------------------
+SECTION 6: FLAGS, UNCERTAINTY, CONFIDENCE, BADGE
+-------------------------------------------------------------------
+
+6.1 FLAGS (all displayed, never suppressed; carried and extended)
+    DATA_GAP_GSC / _TRENDS1 / _TRENDS2 / _GA4 / _SOCIAL
+        A source is missing; the affected dimension(s) excluded.
+    SIGNAL_CHANGE
+        Active-dimension set differs from prior month; MoM delta withheld.
+    RISING_TIDE
+        Category moving with the brand; some movement may be category-wide.
+    LARGE_SWING (per signal: _IMPRESSIONS, _CLICKS, _DIRECT, _TRENDS, etc.)
+        A signal move was large enough to hit the +/-40-point cap (3.3).
+        Raw value shown; contribution capped.
+    PROVISIONAL_BASELINE (per active dimension)
+        A dimension's baseline has not yet locked a full cycle (under 12
+        months of that metric). Its baseline is still expanding and is not
+        season-neutral yet; interpret with lower weight (2.5). Common for
+        social until it accumulates a full year.
+    SEASONAL_PENDING
+        The seasonal-adjustment layer (0.6, 3.2) is not yet loaded, so scored
+        months still carry their own seasonal component. Present on every
+        month until the seasonal coefficients are populated (Section 13).
+        Clears automatically once SEASONAL_INDEX is loaded.
+    SINGLE_PLATFORM_SOCIAL
+        Organic Social scored on one platform only (4.3).
+    SMALL_BASE (per metric)
+        Baseline below FLOOR; metric in point-mode or display-only (4.6).
+    INSUFFICIENT_TIER
+        Fewer than 2 dimensions active; show "Insufficient data", not a
+        number (6.2).
+    WIDE_BAND
+        Uncertainty band large this month (6.3). Internal; surfaces on the
+        click-through detail, not the homepage.
+
+6.2 CONFIDENCE TIER (carried unchanged from v1.2)
+    A coverage badge, deterministic, not a score input. It describes how
+    many dimensions feed the score:
+      Bronze: Search + Digital + Competitive + Category (any subset active).
+      Silver: Bronze + Social Listening + Paid Brand Efficiency active.
+      Gold:   Silver + Direct Awareness active.
+    Note: "confidence tier" is COVERAGE, a separate idea from the
+    statistical uncertainty band in 6.3. They are independent: a Gold
+    client in a volatile category can carry a wide band; a Bronze client in
+    a stable category can carry a tight one. The word "confidence" stays
+    attached to the tier in the UI. The band uses a different name
+    ("uncertainty" / "signal-to-noise") and is not prominent (6.3).
+
+6.3 UNCERTAINTY BAND (new; secondary layer; not prominent)
+    For each signal, volatility = standard deviation of its month-to-month
+    movement changes over scored history (log-changes for ratio signals,
+    point-changes for point signals), floored (VOL_FLOOR_LOG 0.02,
+    VOL_FLOOR_PCT 0.15) so a very stable metric does not read as zero-noise.
+    The band on the BVI is these signal volatilities propagated through the
+    Section 3 sensitivities and the active weights. It is deterministic
+    given the data.
+    Placement: the band is NOT on the dashboard homepage. It is available
+    when an AD clicks into a month's detail, and it is documented here so
+    anyone may interrogate it. Its two working jobs are the badge (6.4) and
+    gating whether a small change is worth narrating (7.3). A wide band on a
+    given month raises WIDE_BAND.
+    Honesty note: because the band is not prominent, the burden of honesty
+    about a shaky month falls on the badge and the narrative. When a move is
+    inside the band, the badge must not read Improving/Declining (6.4).
+
+6.4 TRAJECTORY BADGE (new; derived from the number's own direction)
+    The badge describes which way the BVI itself has moved, so the number
+    and the badge can never contradict (a flat number is always Stable).
+    Compute the slope of the BVI over the trailing BADGE_WINDOW scored
+    months (default 3).
+      Improving:  slope over the window exceeds the band.
+      Declining:  slope over the window is below the negative band.
+      Stable:     movement within the band.
+      Watch:      an otherwise Improving month where RISING_TIDE is active
+                  (gains may reflect the category, not the brand), OR a
+                  positive level that has begun to slope down beyond the
+                  band (an eroding lead). "Watch" is the honest read that a
+                  level measure alone would miss.
+    A brand well above baseline that starts sliding shows a high number and
+    a Watch/Declining badge. That combination is coherent and is the single
+    most useful signal a brand-health tool can surface.
+
+
+-------------------------------------------------------------------
+SECTION 7: NARRATIVE GENERATION (Claude API) (carried, re-based)
+-------------------------------------------------------------------
+
+7.1 WHAT CLAUDE RECEIVES
+    After all scores are calculated, Claude API is called once per month
+    with: final BVI and MoM delta (if comparable), dimension scores, the
+    key signals that drove each dimension, the brand-specific-vs-category
+    split where relevant, all active flags, client name, competitors,
+    category terms, confidence tier. The uncertainty band is provided so
+    Claude can hedge a within-band month.
+
+7.2 WHAT CLAUDE PRODUCES
+    A 2-3 sentence narrative. Nothing else. Claude does not recalculate,
+    override, or question the scores.
+
+7.3 LOCKED NARRATIVE RULES (carried, re-based to baseline language)
+    - Lead with the BVI and its primary driver, framed against baseline
+      ("X above where tracking began" rather than "up X since last month").
+    - Second sentence: the strongest brand-specific signal, stated as
+      growth net of category where that applies.
+    - Third sentence if warranted: a flag, watch item, or context note.
+    - RISING_TIDE active: must say some movement may be category-wide.
+    - LARGE_SWING active: must acknowledge the swing.
+    - SIGNAL_CHANGE active: must note the score is not directly comparable
+      to the prior month.
+    - A within-band month (6.3): do not overstate; describe as broadly flat.
+    - No em dashes. No hollow openers ("This month", "Overall", "In
+      summary", "Looking at"). No hedging when data is clear. No mention of
+      weights, methodology, or scoring mechanics. No banned words (7.4).
+
+7.4 BANNED WORDS (carried unchanged)
+    delve, intricate, tapestry, pivotal, underscore, landscape, foster,
+    testament, enhance, crucial, moreover, realm, beacon, synergy,
+    revolutionize, transformative, game-changer, cutting-edge,
+    comprehensive, utilize, robust, leverage, streamline, empower,
+    seamlessly, holistic, actionable, impactful, elevate, unlock, nuanced,
+    curate.
+
+
+-------------------------------------------------------------------
+SECTION 8: DATA SOURCES REFERENCE - v1 BRONZE TIER (carried unchanged)
+-------------------------------------------------------------------
+  Source              Format    Export path
+  ---------------------------------------------------------------------
+  GSC                 ZIP       Performance > Search results > remove all
+                                filters > Last 16 months > Export > CSV (ZIP)
+  Trends Export 1     CSV       brand + up to 3 competitors, one query
+  Trends Export 2     CSV       brand + category terms, separate query
+  GA4 Traffic Acq.    CSV       Acquisition > Traffic acquisition >
+                                Date dimension Month > Download CSV
+  Instagram           Manual    Meta Business Suite > Insights
+  TikTok              Manual    TikTok Studio > Analytics
+  SEMrush             Manual/CSV Keyword Overview, category volume (display)
+
+
+-------------------------------------------------------------------
+SECTION 9: PLAIN-LANGUAGE TRANSLATION (surface layer; how an AD explains it)
+-------------------------------------------------------------------
+The engine works in log-growth and points. The AD and CFO never see those.
+The fixed mapping in Section 3 lets the same computation be said plainly:
+
+  Headline: "The BVI is 63, up 8 points from your baseline period. On a
+  0-100 scale where 50 is exactly where you started, that means brand
+  health is meaningfully stronger than at onboarding."
+
+  Category framing (the strongest CFO line, from deseasonalization):
+  "Branded search interest is about 15% above your starting point. The
+  category rose about 6% over the same stretch, so roughly 9 points of that
+  is your brand specifically, not the category tide lifting everyone."
+
+  Trajectory: "The score has been climbing for three straight months, which
+  is why it reads Improving rather than a one-month bump."
+
+  Honest hedge on a quiet month: "Movement this month was inside the range
+  we would expect from normal fluctuation, so we are calling it broadly
+  flat rather than reading into it."
+
+None of these sentences needs a statistics background. All are exact
+restatements of the engine output, not simplifications that lose fidelity.
+
+
+-------------------------------------------------------------------
+SECTION 10: TWO-LAYER DESIGN OF RECORD
+-------------------------------------------------------------------
+ENGINE LAYER: season-neutral baseline-relative log-growth and point
+  movement, category deseasonalization on the one search signal, seasonal-
+  index subtraction on the volume signals (no-op until loaded), per-signal
+  cap, single assembly, single map to 0-100, deterministic. Volatility
+  computed separately for the band and badge only.
+SURFACE LAYER: plain-language restatement (Section 9), the 0-100 headline,
+  the badge, and the narrative. The uncertainty band lives one click deep.
+MAPPING: the Section 3 constants, fully listed, are the only bridge between
+  the layers. Anyone may open this section and the engine file and trace any
+  number end to end. That traceability is the point of the design.
+
+
+-------------------------------------------------------------------
+SECTION 11: POST-LAUNCH VALIDATION BACKLOG
+-------------------------------------------------------------------
+All design decisions are settled (Section 0). The items below are checks to
+run once real client data exists; the data-dependent ones are detailed in
+Section 13. None blocks build or launch.
+
+11.1 Retune the Section 3.3 sensitivities and the Section 4.6 small-base
+     floors against real fashion-client history once the first cohort has
+     >=6 scored months each (retune trigger, 3.6). Retuning adjusts absolute
+     score levels only; logic, direction, and ordering are unaffected.
+11.2 Validate that Category Context (4.5) and the Search deseasonalization
+     (4.1 C) are not measuring the same thing. Check correlation across real
+     clients; if high, collapse to one place per the 0.2 alternatives.
+11.3 Onboarding dependency: deseasonalization is only as good as the Export 2
+     category terms. Poorly chosen terms make the category reference
+     meaningless. Add a term-quality review gate to onboarding. This raises a
+     formerly minor step to a scoring-critical one.
+11.4 Digital and Social have no category comparator and are not
+     deseasonalized; they carry wider bands. Assess later whether an
+     alternative reference exists.
+
+
+-------------------------------------------------------------------
+SECTION 12: VERSION HISTORY
+-------------------------------------------------------------------
+  v1.0  May 2026  Initial spec. Relative (MoM) scoring. Bronze only.
+  v1.1  May 2026  Added composition/comparability, flags, removed dummy
+                  data provisions, small-brand handling, large-swing cap.
+  v1.2  May 2026  Moved SEMrush to Category Context. No scoring change.
+  v2.0            Replaced MoM with baseline-relative scoring. Fixed
+                  baseline window. Category deseasonalization on the Search
+                  Trends signal. Rising tide continuous, no multiplier.
+                  Removed lookup tables for linear sensitivities with a
+                  single final map. Redefined Category Context to share/gap.
+                  Generalized small-brand to small-base. Added uncertainty
+                  band and trajectory badge. Two-layer design; plain-language
+                  translation.
+  v2.1  (this)    Fixed a seasonality flaw in v2.0. Baseline moved from the
+                  first 3 months to the SEASON-NEUTRAL FULL-CYCLE MEAN (0.1,
+                  2.5), removing seasonal anchor bias and scoring all backfill
+                  months day one. Added the SEASONAL-ADJUSTMENT LAYER for the
+                  volume signals (0.6, 3.2), built and neutral, coefficients
+                  pending the pooled data pull (Section 13). Removed the
+                  baseline-period exclusion; every month with data is now
+                  scored (3.5). Replaced BASELINE_PERIOD / THIN_BASELINE flags
+                  with PROVISIONAL_BASELINE and SEASONAL_PENDING (6.1).
+                  Carried forward all v2.0 and v1.2 elements.
+  v2.2  (planned) Load seasonal coefficients and retune sensitivities from the
+                  pooled fashion pull. Data change plus a calibration retune;
+                  no logic change. See Section 13.
+
+
+-------------------------------------------------------------------
+SECTION 13: PENDING IRIS DATA - EXACTLY WHAT CHANGES AT v2.2
+-------------------------------------------------------------------
+Everything in this spec is implementable now. One input is outstanding: a
+pooled monthly panel across PDM fashion clients, used to (1) build the
+per-month seasonal coefficients for the volume signals and (2) retune the
+score sensitivities on real movement. When that data lands, the following
+change - and NOTHING ELSE does. No dimension, weight, signal, flag, or
+formula in Sections 1-10 is affected.
+
+13.1 POPULATE SEASONAL_INDEX (activates 0.6 / 3.2b).
+     Fill the table SEASONAL_INDEX[sub_vertical][calendar_month][family] with
+     the typical level of each volume family in each calendar month relative
+     to its annual mean, estimated per fashion sub-vertical from the pooled
+     panel. Families: search_volume (branded impressions, branded clicks),
+     direct_traffic (direct sessions), organic_traffic (organic sessions),
+     social_reach (organic reach), social_growth (follower growth rate).
+     Effect: SEASONAL_PENDING clears; scored months stop carrying their own
+     seasonal component; single-month reads become trustworthy, not just
+     full-cycle trajectory.
+     Data needed: real-calendar-month panel (YYYY-MM), per client, per volume
+     signal, tagged by fashion sub-vertical, with known-anomaly months
+     flagged for exclusion. Longer history per client sharpens the estimate;
+     more clients compensate for short individual histories.
+     Implementation note: confirm the parser's month-key format against
+     parse_calendar_month() before loading, and add the real format if it is
+     not already handled.
+
+13.2 RETUNE THE SENSITIVITIES (3.6).
+     Recompute LOG_SENSITIVITY, PCT_POINT_SENSITIVITY, POSITION_SENSITIVITY
+     (and confirm SMALL-BASE floors, 4.6) against the observed distribution
+     of baseline-relative movement in the pooled panel, so the 45-85 band and
+     the 50-neutral point map onto real fashion-brand behaviour.
+     Effect: absolute score levels firm up. Direction, ordering, and all
+     logic are unchanged. This is a version increment with sign-off.
+
+13.3 VALIDATE THE CATEGORY OVERLAP (11.2).
+     With multi-client data, check the correlation between Category Context
+     (4.5) and the Search deseasonalization (3.2a). If high, collapse per the
+     0.2 alternatives.
+
+13.4 CONFIRM PROVISIONAL-BASELINE BEHAVIOUR FOR SOCIAL (2.5).
+     With real social histories, confirm the expand-then-lock baseline and
+     the wider interim band behave as intended over a full social cycle.
+
+Until v2.2, the engine runs on the season-neutral baseline with the seasonal
+layer neutral. It is correct and usable in that state; it simply asks readers
+to weigh trajectory over a full cycle rather than over-read a single month.
+
+===================================================================
+END OF SPECIFICATION
+===================================================================
