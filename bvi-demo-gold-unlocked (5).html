@@ -129,39 +129,44 @@ function getStaleness(surveyIdx, curIdx) {
 // ── SIGNAL STATUS LOGIC ──────────────────────────────────────────────────────
 function calcDimStatus(dimId, d, prev) {
   if(dimId==="search") {
+    if(d.impressions==null&&d.clicks==null&&d.trendsIdx==null) return null;
+    const impPct = d.impressionsDelta!=null?`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%`:"—";
+    const clkPct = d.clicksDelta!=null?`${(d.clicksDelta>0?"+":"")+d.clicksDelta}%`:"—";
+    const trendsDisp = d.trendsIdx!=null?`${d.trendsIdx}/100`:"—";
+    const posDisp = d.position!=null?`${d.position}`:"—";
     const deltas=[d.impressionsDelta,d.clicksDelta,d.trendsIdxDelta].filter(x=>x!=null);
     const pos=deltas.filter(x=>x>0).length, neg=deltas.filter(x=>x<0).length;
     if(d.risingTide) return {status:"Watch",
-      headline:`Trends index ${d.trendsIdx}/100 but category rising in parallel`,
+      headline:`Trends index ${trendsDisp} but category rising in parallel`,
       factors:[
-        {label:"Branded impressions",val:`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%`,positive:d.impressionsDelta>0},
-        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0},
+        {label:"Branded impressions",val:impPct,positive:(d.impressionsDelta||0)>0},
+        {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0},
         {label:"Category context",val:"Rising tide detected",positive:false,note:"Category rising alongside brand — gains may not be brand-specific"}
       ],
       method:"Watch applied when category index moves in the same direction as brand, reducing confidence that gains are brand-driven."};
     if(pos>=2) return {status:"Improving",
-      headline:`Branded impressions ${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%, Trends index ${d.trendsIdx}/100`,
+      headline:`Branded impressions ${impPct}, Trends index ${trendsDisp}`,
       factors:[
-        {label:"Branded impressions",val:`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}% MoM`,positive:d.impressionsDelta>0},
-        {label:"Branded clicks",val:`${(d.clicksDelta>0?"+":"")+d.clicksDelta}% MoM`,positive:d.clicksDelta>0},
-        {label:"Avg position",val:`${d.position}`,positive:(d.positionDelta||0)<=0,note:"Lower = better ranking"},
-        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0}
+        {label:"Branded impressions",val:`${impPct} MoM`,positive:(d.impressionsDelta||0)>0},
+        {label:"Branded clicks",val:`${clkPct} MoM`,positive:(d.clicksDelta||0)>0},
+        {label:"Avg position",val:posDisp,positive:(d.positionDelta||0)<=0,note:"Lower = better ranking"},
+        {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0}
       ],
       method:"Improving = majority of branded impressions, clicks, and Trends index moving positively MoM."};
     if(neg>=2) return {status:"Declining",
-      headline:`Branded impressions ${d.impressionsDelta}%, Trends index ${d.trendsIdx}/100`,
+      headline:`Branded impressions ${impPct}, Trends index ${trendsDisp}`,
       factors:[
-        {label:"Branded impressions",val:`${d.impressionsDelta}% MoM`,positive:false},
-        {label:"Branded clicks",val:`${d.clicksDelta}% MoM`,positive:false},
-        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0}
+        {label:"Branded impressions",val:`${impPct} MoM`,positive:false},
+        {label:"Branded clicks",val:`${clkPct} MoM`,positive:false},
+        {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0}
       ],
       method:"Declining = majority of branded impressions, clicks, and Trends index moving negatively MoM."};
     return {status:"Stable",
-      headline:`Branded impressions ${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%, Trends index ${d.trendsIdx}/100`,
+      headline:`Branded impressions ${impPct}, Trends index ${trendsDisp}`,
       factors:[
-        {label:"Branded impressions",val:`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}% MoM`,positive:d.impressionsDelta>0},
-        {label:"Branded clicks",val:`${(d.clicksDelta>0?"+":"")+d.clicksDelta}% MoM`,positive:d.clicksDelta>0},
-        {label:"Google Trends index",val:`${d.trendsIdx}/100`,positive:(d.trendsIdxDelta||0)>=0}
+        {label:"Branded impressions",val:`${impPct} MoM`,positive:(d.impressionsDelta||0)>0},
+        {label:"Branded clicks",val:`${clkPct} MoM`,positive:(d.clicksDelta||0)>0},
+        {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0}
       ],
       method:"Stable = mixed or flat signals with no clear directional trend."};
   }
@@ -184,26 +189,28 @@ function calcDimStatus(dimId, d, prev) {
     const erD=d.engagementRateDelta||0, grD=d.followerGrowthRateDelta||0;
     const status=erD>0&&grD>=0?"Improving":erD<0&&grD<0?"Declining":(erD<0||grD<0)?"Watch":"Stable";
     return {status,
-      headline:`Engagement rate ${d.engagementRate}%, follower growth ${d.followerGrowthRate}% MoM`,
+      headline:`Engagement rate ${d.engagementRate!=null?d.engagementRate+"%":"—"}, follower growth ${d.followerGrowthRate}% MoM`,
       factors:[
         {label:"Follower growth rate",val:`${d.followerGrowthRate}% MoM`,positive:grD>=0},
         {label:"Net follower growth",val:`+${d.netFollowerGrowth!=null?d.netFollowerGrowth.toLocaleString():"--"}`,positive:true},
-        {label:"Organic reach",val:`${d.reach}K`,positive:true},
-        {label:"Engagement rate",val:`${d.engagementRate}%`,positive:erD>=0,note:erD<0?"Declining engagement — watch audience quality":""}
+        {label:"Organic reach",val:d.reach!=null?`${d.reach}K`:"—",positive:true},
+        {label:"Engagement rate",val:d.engagementRate!=null?`${d.engagementRate}%`:"—",positive:erD>=0,note:erD<0?"Declining engagement — watch audience quality":""}
       ],
       method:"Primary: engagement rate MoM. Secondary: follower growth rate. Engagement weighted higher as it reflects active audience interest."};
   }
   if(dimId==="competitive") {
+    if(d.kgTrends==null||d.brandShare==null) return null;
     const shareD=d.brandShareDelta||0;
-    const gapNow=d.kgTrends-Math.max(d.smTrends,d.carTrends,d.tedTrends);
-    const gapPrev=prev?prev.kgTrends-Math.max(prev.smTrends,prev.carTrends,prev.tedTrends):gapNow;
+    const smNow=d.smTrends??0, carNow=d.carTrends??0, tedNow=d.tedTrends??0;
+    const gapNow=d.kgTrends-Math.max(smNow,carNow,tedNow);
+    const gapPrev=(prev&&prev.kgTrends!=null)?prev.kgTrends-Math.max(prev.smTrends??0,prev.carTrends??0,prev.tedTrends??0):gapNow;
     const gapChg=gapNow-gapPrev;
     const status=shareD>=2?"Improving":shareD<=-3?"Declining":gapChg<-3?"Watch":"Stable";
     return {status,
       headline:`#1 position, ${d.brandShare}% share of branded search, Trends index ${d.kgTrends}`,
       factors:[
         {label:"Trends index (Kurt Geiger)",val:`${d.kgTrends}/100`,positive:(d.trendsIdxDelta||0)>=0},
-        {label:"Gap to Steve Madden",val:`${d.kgTrends-d.smTrends} pts`,positive:gapChg>=0,note:gapChg<0?"Gap narrowing — competitor closing":""},
+        {label:"Gap to Steve Madden",val:d.smTrends!=null?`${d.kgTrends-d.smTrends} pts`:"—",positive:gapChg>=0,note:gapChg<0?"Gap narrowing — competitor closing":""},
         {label:"Share of branded search",val:`${d.brandShare}%`,positive:shareD>=0},
         {label:"Brand Trends index MoM",val:d.trendsIdxDelta!=null?`${(d.trendsIdxDelta>0?"+":"")+d.trendsIdxDelta}%`:"--",positive:(d.trendsIdxDelta||0)>=0}
       ],
@@ -244,15 +251,16 @@ function sparklineSVG(w, h, curIdx) {
   const minV=38, maxV=78, n=RAW.length;
   const xp = i => 2+(i/(n-1))*(w-4);
   const yp = v => 3+(1-(v-minV)/(maxV-minV))*(h-6);
-  const catPts = CAT_TRENDS.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ");
-  const bfPts = RAW.map((m,i)=>m.status==="backfill"?`${xp(i).toFixed(1)},${yp(m.bvi).toFixed(1)}`:null).filter(Boolean).join(" ");
-  const lvPts = RAW.map((m,i)=>m.status==="live"?`${xp(i).toFixed(1)},${yp(m.bvi).toFixed(1)}`:null).filter(Boolean).join(" ");
-  const cx=xp(curIdx), cy=yp(RAW[curIdx].bvi);
+  const catPts = CAT_TRENDS.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`:null).filter(Boolean).join(" ");
+  const bfPts = RAW.map((m,i)=>(m.status==="backfill"&&m.bvi!=null)?`${xp(i).toFixed(1)},${yp(m.bvi).toFixed(1)}`:null).filter(Boolean).join(" ");
+  const lvPts = RAW.map((m,i)=>(m.status==="live"&&m.bvi!=null)?`${xp(i).toFixed(1)},${yp(m.bvi).toFixed(1)}`:null).filter(Boolean).join(" ");
+  const curBvi = RAW[curIdx].bvi;
+  const cx=xp(curIdx), cy=curBvi!=null?yp(curBvi):null;
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
     <polyline points="${catPts}" fill="none" stroke="${B.lightPurple}" stroke-width="1" opacity="0.4" stroke-dasharray="2,3"/>
     ${bfPts?`<polyline points="${bfPts}" fill="none" stroke="${B.lightPurple}" stroke-width="1.5" stroke-dasharray="4,3"/>`:""}
     ${lvPts?`<polyline points="${lvPts}" fill="none" stroke="${B.offWhite}" stroke-width="2"/>`:""}
-    <circle cx="${cx}" cy="${cy}" r="3.5" fill="${B.offWhite}"/>
+    ${cy!=null?`<circle cx="${cx}" cy="${cy}" r="3.5" fill="${B.offWhite}"/>`:""}
   </svg>`;
 }
 
@@ -261,19 +269,20 @@ function trendChartSVG(curIdx) {
   const W=620, H=170, pad={l:32,r:12,t:14,b:22}, minV=38, maxV=78, n=RAW.length;
   const xp = i => pad.l+(i/(n-1))*(W-pad.l-pad.r);
   const yp = v => pad.t+(1-(v-minV)/(maxV-minV))*(H-pad.t-pad.b);
-  const bfIdx = RAW.map((m,i)=>m.status==="backfill"?i:null).filter(x=>x!==null);
-  const lvIdx = RAW.map((m,i)=>m.status==="live"?i:null).filter(x=>x!==null);
-  const joinIdx = RAW.findIndex(m=>m.status==="live");
-  const catPts = CAT_TRENDS.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ");
+  const bfIdx = RAW.map((m,i)=>(m.status==="backfill"&&m.bvi!=null)?i:null).filter(x=>x!==null);
+  const lvIdx = RAW.map((m,i)=>(m.status==="live"&&m.bvi!=null)?i:null).filter(x=>x!==null);
+  const joinIdx = RAW.findIndex(m=>m.status==="live"&&m.bvi!=null);
+  const catPts = CAT_TRENDS.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`:null).filter(Boolean).join(" ");
   const bfPts = bfIdx.map(i=>`${xp(i).toFixed(1)},${yp(RAW[i].bvi).toFixed(1)}`).join(" ");
   const lvPts = lvIdx.map(i=>`${xp(i).toFixed(1)},${yp(RAW[i].bvi).toFixed(1)}`).join(" ");
-  const cx=xp(curIdx), cy=yp(RAW[curIdx].bvi);
+  const curBvi = RAW[curIdx].bvi;
+  const cx=xp(curIdx), cy=curBvi!=null?yp(curBvi):null;
   const gridLines = [45,55,65].map(v=>`
     <line x1="${pad.l}" y1="${yp(v)}" x2="${W-pad.r}" y2="${yp(v)}" stroke="${B.gray}" stroke-width="0.5" opacity="0.25"/>
     <text x="${pad.l-5}" y="${yp(v)+3.5}" font-size="9" fill="${B.gray}" text-anchor="end" font-family="'Darker Grotesque',Arial,sans-serif">${v}</text>`).join("");
   const labels = RAW.map((m,i)=>`<text x="${xp(i)}" y="${H-4}" font-size="9" fill="${i===curIdx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===curIdx?700:400}">${MONTHS[i]}</text>`).join("");
-  const risingRing = RAW[curIdx].risingTide ? `<circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="${B.yellow}" stroke-width="2" opacity="0.7"/>` : "";
-  const joinLine = joinIdx>0 ? `<line x1="${xp(joinIdx-1)}" y1="${yp(RAW[joinIdx-1].bvi)}" x2="${xp(joinIdx)}" y2="${yp(RAW[joinIdx].bvi)}" stroke="${B.purple}" stroke-width="1.5" stroke-dasharray="2,2"/>` : "";
+  const risingRing = (cy!=null&&RAW[curIdx].risingTide) ? `<circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="${B.yellow}" stroke-width="2" opacity="0.7"/>` : "";
+  const joinLine = (joinIdx>0&&RAW[joinIdx-1].bvi!=null) ? `<line x1="${xp(joinIdx-1)}" y1="${yp(RAW[joinIdx-1].bvi)}" x2="${xp(joinIdx)}" y2="${yp(RAW[joinIdx].bvi)}" stroke="${B.purple}" stroke-width="1.5" stroke-dasharray="2,2"/>` : "";
   return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
     ${gridLines}
     <polyline points="${catPts}" fill="none" stroke="${B.gray}" stroke-width="1.5" stroke-dasharray="3,4" opacity="0.6"/>
@@ -281,18 +290,18 @@ function trendChartSVG(curIdx) {
     ${joinLine}
     ${lvPts?`<polyline points="${lvPts}" fill="none" stroke="${B.purple}" stroke-width="2.5"/>`:""}
     ${risingRing}
-    <circle cx="${cx}" cy="${cy}" r="4.5" fill="${B.purple}"/>
-    <circle cx="${cx}" cy="${cy}" r="2.5" fill="${B.offWhite}"/>
+    ${cy!=null?`<circle cx="${cx}" cy="${cy}" r="4.5" fill="${B.purple}"/><circle cx="${cx}" cy="${cy}" r="2.5" fill="${B.offWhite}"/>`:""}
     ${labels}
   </svg>`;
 }
 
 // ── METRIC CARD ───────────────────────────────────────────────────────────────
 function metricCard(label, value, dval, dsuf="", inv=false, tip="", sub="") {
+  const dispValue = (value==null||value==="null")?"—":value;
   return `<div class="card">
     <div class="label" style="display:flex;align-items:center;gap:4px;margin-bottom:5px">${label}${tip?`<span title="${tip}" style="width:14px;height:14px;border-radius:50%;background:rgba(171,171,171,.25);display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#ABABAB;cursor:help;font-weight:700">?</span>`:""}
     </div>
-    <div class="big-num">${value}</div>
+    <div class="big-num">${dispValue}</div>
     <div style="margin-top:5px">${delta(dval,dsuf,inv)}</div>
     ${sub?`<div style="font-size:10px;color:#ABABAB;margin-top:4px">${sub}</div>`:""}
   </div>`;
@@ -386,11 +395,11 @@ function renderSearch(d) {
     <div class="grid4" style="margin-bottom:12px">
       ${metricCard("Branded impressions",d.impressions.toLocaleString()+"K",d.impressionsDelta,"%","","GSC Performance, filtered to branded queries.")}
       ${metricCard("Branded clicks",d.clicks.toLocaleString()+"K",d.clicksDelta,"%","","GSC Performance, filtered to branded queries.")}
-      ${metricCard("Branded CTR",d.ctr+"%",d.ctrDelta," pts","","GSC — clicks / impressions on branded queries.")}
+      ${metricCard("Branded CTR",(d.ctr!=null?d.ctr+"%":"—"),d.ctrDelta," pts","","GSC — clicks / impressions on branded queries.")}
       ${metricCard("Avg position",d.position,d.positionDelta," pts",true,"GSC avg ranking for branded queries. Lower is better.")}
     </div>
     <div class="grid2">
-      ${metricCard("Google Trends index",d.trendsIdx+"/100",d.trendsIdxDelta," pts","","Google Trends Export 1 — brand + 3 competitors. Normalized to 100 = peak interest.")}
+      ${metricCard("Google Trends index",(d.trendsIdx!=null?d.trendsIdx+"/100":"—"),d.trendsIdxDelta," pts","","Google Trends Export 1 — brand + 3 competitors. Normalized to 100 = peak interest.")}
       ${metricCard("Trends YoY",d.trendsYoY!=null?(d.trendsYoY>0?"+":"")+d.trendsYoY+"%":"—",null,"","","Current month index vs. same month prior year.")}
     </div>
     <div class="note-box" style="margin-top:12px">Google Trends normalizes to 0-100. 100 = peak interest for the period. Use for directional tracking only — does not measure absolute volume.</div>
@@ -428,16 +437,16 @@ function renderCompetitive(d) {
     {name:"Steve Madden",idx:d.smTrends,vol:d.smVol,client:false},
     {name:"Carvela",idx:d.carTrends,vol:d.carVol,client:false},
     {name:"Ted Baker",idx:d.tedTrends,vol:d.tedVol,client:false}
-  ].sort((a,b)=>b.idx-a.idx);
+  ].sort((a,b)=>(b.idx??-1)-(a.idx??-1));
   const rows = brands.map((br,i)=>`<div style="padding:10px 0;border-bottom:0.5px solid rgba(171,171,171,.12)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
       <div style="display:flex;align-items:center;gap:7px"><span style="font-size:10px;color:#ABABAB;width:14px">#${i+1}</span><span style="font-size:13px;font-weight:${br.client?700:400};color:${br.client?B.purple:B.nearBlack}">${br.name}</span></div>
       <div style="display:flex;align-items:center;gap:12px">
-        <span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.idx}</span><span style="font-size:10px;color:#ABABAB">/100</span>
-        <span style="font-size:11px;color:#ABABAB;min-width:50px;text-align:right">${br.vol}K</span>
+        <span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.idx!=null?br.idx:"—"}</span><span style="font-size:10px;color:#ABABAB">/100</span>
+        <span style="font-size:11px;color:#ABABAB;min-width:50px;text-align:right">${br.vol!=null?br.vol+"K":"—"}</span>
       </div>
     </div>
-    <div class="comp-bar-wrap"><div style="height:100%;width:${(br.idx/70)*100}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
+    <div class="comp-bar-wrap"><div style="height:100%;width:${br.idx!=null?(br.idx/70)*100:0}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
   </div>`).join("");
   return `<div>
     <div style="display:flex;gap:10px;align-items:flex-start">
@@ -448,7 +457,7 @@ function renderCompetitive(d) {
       </div>
       <div style="width:160px;background:#F5F5F5;border-radius:8px;padding:12px 14px;flex-shrink:0">
         <div class="label" style="margin-bottom:6px">Share of branded search</div>
-        <div style="font-size:24px;font-weight:700;color:#7756FF">${d.brandShare}%</div>
+        <div style="font-size:24px;font-weight:700;color:#7756FF">${d.brandShare!=null?d.brandShare+"%":"—"}</div>
         ${delta(d.brandShareDelta," pts")}
         <div style="font-size:10px;color:#ABABAB;margin-top:6px">SEMrush est. vol. / sum all 4 brands</div>
       </div>
@@ -458,36 +467,37 @@ function renderCompetitive(d) {
 }
 
 function renderCategory(d, idx) {
-  const gap = d.kgTrends - d.catTrends;
+  const hasGap = d.kgTrends!=null && d.catTrends!=null;
+  const gap = hasGap ? d.kgTrends - d.catTrends : null;
   const prev = idx>0?RAW[idx-1]:null;
-  const catD = prev?d.catTrends-prev.catTrends:null;
-  const gapD = prev?(gap-(prev.kgTrends-prev.catTrends)):null;
+  const catD = (prev&&d.catTrends!=null&&prev.catTrends!=null)?d.catTrends-prev.catTrends:null;
+  const gapD = (prev&&gap!=null&&prev.kgTrends!=null&&prev.catTrends!=null)?(gap-(prev.kgTrends-prev.catTrends)):null;
   const W=580,H=130,pad={l:28,r:8,t:10,b:22},minV=35,maxV=75,n=RAW.length;
   const xp=i=>pad.l+(i/(n-1))*(W-pad.l-pad.r);
   const yp=v=>pad.t+(1-(v-minV)/(maxV-minV))*(H-pad.t-pad.b);
   const labels=RAW.map((m,i)=>`<text x="${xp(i)}" y="${H-4}" font-size="8" fill="${i===idx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===idx?700:400}">${MONTHS[i]}</text>`).join("");
   const catChart = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
     ${[40,50,60,70].map(v=>`<line x1="${pad.l}" y1="${yp(v)}" x2="${W-pad.r}" y2="${yp(v)}" stroke="${B.gray}" stroke-width="0.5" opacity="0.2"/><text x="${pad.l-4}" y="${yp(v)+3}" font-size="8" fill="${B.gray}" text-anchor="end" font-family="'Darker Grotesque',Arial,sans-serif">${v}</text>`).join("")}
-    <polyline points="${CAT_TRENDS3.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ")}" fill="none" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="2,4"/>
-    <polyline points="${CAT_TRENDS2.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(" ")}" fill="none" stroke="${B.lightPurple}" stroke-width="1" stroke-dasharray="2,3"/>
-    <polyline points="${RAW.map((m,i)=>`${xp(i).toFixed(1)},${yp(m.catTrends).toFixed(1)}`).join(" ")}" fill="none" stroke="${B.gray}" stroke-width="1.5" stroke-dasharray="3,3"/>
-    <polyline points="${RAW.map((m,i)=>`${xp(i).toFixed(1)},${yp(m.kgTrends).toFixed(1)}`).join(" ")}" fill="none" stroke="${B.purple}" stroke-width="2.5"/>
-    <circle cx="${xp(idx)}" cy="${yp(RAW[idx].kgTrends)}" r="4" fill="${B.purple}"/>
-    <circle cx="${xp(idx)}" cy="${yp(RAW[idx].catTrends)}" r="3" fill="${B.gray}"/>
+    <polyline points="${CAT_TRENDS3.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`:null).filter(Boolean).join(" ")}" fill="none" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="2,4"/>
+    <polyline points="${CAT_TRENDS2.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`:null).filter(Boolean).join(" ")}" fill="none" stroke="${B.lightPurple}" stroke-width="1" stroke-dasharray="2,3"/>
+    <polyline points="${RAW.map((m,i)=>m.catTrends!=null?`${xp(i).toFixed(1)},${yp(m.catTrends).toFixed(1)}`:null).filter(Boolean).join(" ")}" fill="none" stroke="${B.gray}" stroke-width="1.5" stroke-dasharray="3,3"/>
+    <polyline points="${RAW.map((m,i)=>m.kgTrends!=null?`${xp(i).toFixed(1)},${yp(m.kgTrends).toFixed(1)}`:null).filter(Boolean).join(" ")}" fill="none" stroke="${B.purple}" stroke-width="2.5"/>
+    ${RAW[idx].kgTrends!=null?`<circle cx="${xp(idx)}" cy="${yp(RAW[idx].kgTrends)}" r="4" fill="${B.purple}"/>`:""}
+    ${RAW[idx].catTrends!=null?`<circle cx="${xp(idx)}" cy="${yp(RAW[idx].catTrends)}" r="3" fill="${B.gray}"/>`:""}
     ${labels}
   </svg>`;
   return `<div>
     <div class="grid3" style="margin-bottom:14px">
-      ${metricCard(`Trends index — "women's shoes"`,d.catTrends+"/100",catD," pts")}
-      ${metricCard("Brand vs. category gap",(gap>0?"+":"")+gap+" pts",gapD," pts")}
-      ${metricCard("Category keyword volume",d.catVol.toLocaleString()+"K",d.catVolDelta,"%")}
+      ${metricCard(`Trends index — "women's shoes"`,(d.catTrends!=null?d.catTrends+"/100":"—"),catD," pts")}
+      ${metricCard("Brand vs. category gap",(gap!=null?(gap>0?"+":"")+gap+" pts":"—"),gapD," pts")}
+      ${metricCard("Category keyword volume",(d.catVol!=null?d.catVol.toLocaleString()+"K":"—"),d.catVolDelta,"%")}
     </div>
     <div class="card" style="margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;margin-bottom:2px">Brand vs. category — Google Trends Export 2</div>
       <div style="font-size:10px;color:#ABABAB;margin-bottom:10px">Kurt Geiger index vs. category terms</div>
       ${catChart}
       <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:8px">
-        ${[{color:B.purple,bold:true,label:`Kurt Geiger (${d.kgTrends})`},{color:B.gray,bold:false,label:`"women's shoes" (${d.catTrends})`},{color:B.lightPurple,bold:false,label:`"luxury footwear" (${CAT_TRENDS2[idx]})`},{color:"#B4B2A9",bold:false,label:`"designer shoes" (${CAT_TRENDS3[idx]})`}].map(l=>`<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#ABABAB">
+        ${[{color:B.purple,bold:true,label:`Kurt Geiger (${d.kgTrends!=null?d.kgTrends:"—"})`},{color:B.gray,bold:false,label:`"women's shoes" (${d.catTrends!=null?d.catTrends:"—"})`},{color:B.lightPurple,bold:false,label:`"luxury footwear" (${CAT_TRENDS2[idx]!=null?CAT_TRENDS2[idx]:"—"})`},{color:"#B4B2A9",bold:false,label:`"designer shoes" (${CAT_TRENDS3[idx]!=null?CAT_TRENDS3[idx]:"—"})`}].map(l=>`<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#ABABAB">
           <svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="${l.color}" stroke-width="${l.bold?2.5:1.5}" stroke-dasharray="${l.bold?"none":"3,3"}"/></svg>
           <span style="font-weight:${l.bold?700:400};color:${l.bold?B.nearBlack:B.gray}">${l.label}</span>
         </div>`).join("")}
@@ -495,7 +505,7 @@ function renderCategory(d, idx) {
     </div>
     <div style="background:${d.risingTide?"rgba(250,199,117,.12)":"rgba(225,245,238,.2)"};border:0.5px solid ${d.risingTide?"rgba(250,199,117,.5)":"rgba(93,202,165,.5)"};border-radius:8px;padding:12px 14px">
       <div style="font-size:11px;font-weight:700;margin-bottom:4px">${d.risingTide?"Rising-tide pattern detected this month":"No rising-tide pattern this month"}</div>
-      <div style="font-size:12px;color:#ABABAB;line-height:1.6">${d.risingTide?`The "women's shoes" Trends index rose this month while brand metrics moved in the same direction. Some BVI movement reflects broader category momentum. Brand-vs-category gap ${gap>0?"remains positive at +"+gap+" pts":"has narrowed to "+gap+" pts"}.`:`The "women's shoes" index moved independently of brand metrics. BVI changes are primarily brand-driven. Brand outperforming category by ${gap} pts.`}</div>
+      <div style="font-size:12px;color:#ABABAB;line-height:1.6">${gap==null?"Brand-vs-category gap unavailable — category Trends data missing for this month.":d.risingTide?`The "women's shoes" Trends index rose this month while brand metrics moved in the same direction. Some BVI movement reflects broader category momentum. Brand-vs-category gap ${gap>0?"remains positive at +"+gap+" pts":"has narrowed to "+gap+" pts"}.`:`The "women's shoes" index moved independently of brand metrics. BVI changes are primarily brand-driven. Brand outperforming category by ${gap} pts.`}</div>
     </div>
   </div>`;
 }
@@ -664,7 +674,8 @@ function render() {
   const {idx, tier, tab} = state;
   const d = RAW[idx], prev = idx>0?RAW[idx-1]:null;
   const isBackfill = d.status === "backfill";
-  const bviDelta = prev ? d.bvi - prev.bvi : null;
+  const isUnscored = d.bvi==null;
+  const bviDelta = (prev && d.bvi!=null && prev.bvi!=null) ? d.bvi - prev.bvi : null;
   const isSilver = tier==="silver"||tier==="gold";
   const isGold = tier==="gold";
 
@@ -683,8 +694,8 @@ function render() {
   const activeTab = TABS.find(t=>t.id===tab) ? tab : "search";
   const tierLabel = isGold?"Gold":isSilver?"Silver":"Bronze";
 
-  // Adjusted BVI for tier
-  const adjBVI = isGold?Math.min(100,d.bvi+3):isSilver?Math.min(100,d.bvi+1):d.bvi;
+  // Adjusted BVI for tier (null passes through — unscored month, not zero)
+  const adjBVI = d.bvi==null ? null : (isGold?Math.min(100,d.bvi+3):isSilver?Math.min(100,d.bvi+1):d.bvi);
 
   // ── TAB CONTENT
   let tabContent = "";
@@ -714,14 +725,14 @@ function render() {
     {name:"Steve Madden",idx:d.smTrends,vol:d.smVol,client:false},
     {name:"Carvela",idx:d.carTrends,vol:d.carVol,client:false},
     {name:"Ted Baker",idx:d.tedTrends,vol:d.tedVol,client:false}
-  ].sort((a,b)=>b.idx-a.idx);
+  ].sort((a,b)=>(b.idx??-1)-(a.idx??-1));
 
   const compRows = brands.map((br,i)=>`<div style="padding:9px 0;border-bottom:${i<3?"0.5px solid rgba(171,171,171,.12)":"none"}">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
       <div style="display:flex;align-items:center;gap:7px"><span style="font-size:10px;color:#ABABAB;width:14px">#${i+1}</span><span style="font-size:13px;font-weight:${br.client?700:400};color:${br.client?B.purple:B.nearBlack}">${br.name}</span></div>
-      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.idx}</span><span style="font-size:10px;color:#ABABAB">/100</span><span style="font-size:11px;color:#ABABAB;min-width:48px;text-align:right">${br.vol}K</span></div>
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:700;color:${br.client?B.purple:B.nearBlack}">${br.idx!=null?br.idx:"—"}</span><span style="font-size:10px;color:#ABABAB">/100</span><span style="font-size:11px;color:#ABABAB;min-width:48px;text-align:right">${br.vol!=null?br.vol+"K":"—"}</span></div>
     </div>
-    <div class="comp-bar-wrap"><div style="height:100%;width:${(br.idx/70)*100}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
+    <div class="comp-bar-wrap"><div style="height:100%;width:${br.idx!=null?(br.idx/70)*100:0}%;background:${br.client?B.purple:B.gray};border-radius:2px"></div></div>
   </div>`).join("");
 
   // ── TIER BUTTONS
@@ -762,7 +773,7 @@ function render() {
           <button onclick="setIdx(${idx-1})" ${idx===0?"disabled":""} style="width:28px;height:28px;border-radius:6px;border:0.5px solid rgba(171,171,171,.4);background:transparent;font-size:15px;${idx===0?"opacity:.4":""}">&#8249;</button>
           <div style="text-align:center;min-width:76px">
             <div style="font-size:14px;font-weight:700">${MONTHS[idx]}</div>
-            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${isBackfill?"#BA7517":"#0F6E56"}">${isBackfill?"Backfill":"Live"}</div>
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${isUnscored?"#ABABAB":isBackfill?"#BA7517":"#0F6E56"}">${isUnscored?"Unscored":isBackfill?"Backfill":"Live"}</div>
           </div>
           <button onclick="setIdx(${idx+1})" ${idx===RAW.length-1?"disabled":""} style="width:28px;height:28px;border-radius:6px;border:0.5px solid rgba(171,171,171,.4);background:transparent;font-size:15px;${idx===RAW.length-1?"opacity:.4":""}">&#8250;</button>
         </div>
@@ -776,10 +787,16 @@ function render() {
       <div class="purple-card" style="display:flex;flex-direction:column;justify-content:space-between">
         <div>
           <div class="label" style="color:#AFAAF9;margin-bottom:4px">BVI Score</div>
+          ${isUnscored?`
+          <div style="font-size:36px;font-weight:700;color:#F5F5F5;line-height:1">—</div>
+          <div style="font-size:11px;color:#AFAAF9;margin-bottom:10px;line-height:1.5">Insufficient data to score this month</div>
+          <div style="display:inline-block;font-size:9px;padding:2px 8px;border-radius:3px;background:#ABABAB;color:#2B2A29;font-weight:700">Unscored</div>
+          `:`
           <div style="font-size:58px;font-weight:700;color:#F5F5F5;line-height:1">${adjBVI}</div>
           <div style="font-size:11px;color:#AFAAF9;margin-bottom:10px">out of 100</div>
           ${bviDelta!=null?`<div style="font-size:13px;font-weight:700;color:${bviDelta>0?"#CDF8FF":bviDelta<0?"#FFBAFB":"#AFAAF9"};margin-bottom:8px">${bviDelta>0?"↑":bviDelta<0?"↓":"→"} ${Math.abs(bviDelta)} pts MoM</div>`:""}
           <div style="display:inline-block;font-size:9px;padding:2px 8px;border-radius:3px;background:${isBackfill?"#FAC775":tierLabel==="Bronze"?"#FAC775":tierLabel==="Silver"?B.lightPurple:B.yellow};color:#2B2A29;font-weight:700">${tierLabel} confidence</div>
+          `}
         </div>
         <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid rgba(175,170,249,.25)">
           ${sparklineSVG(144,44,idx)}

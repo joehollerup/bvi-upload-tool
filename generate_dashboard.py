@@ -49,12 +49,12 @@ def mom_pct(cur, prev):
     return None if prev in (None, 0) else (cur - prev) / prev * 100
 
 
-def fmt_signed(v, pts=False):
+def fmt_signed(v, pts=False, suf=""):
     if v is None:
         return "—"
     if pts:
         return ("+" if v >= 0 else "") + f"{v:.0f}pts"
-    return ("+" if v >= 0 else "") + f"{v:.0f}"
+    return ("+" if v >= 0 else "") + f"{v:.0f}" + suf
 
 
 def sgn(v, dec=0, suf=""):
@@ -161,8 +161,10 @@ def _build_data_block(cfg, T, G_data, A, S):
 
         bvi = round(r["bvi_score"]) if r.get("bvi_score") is not None else None
         # v2.1: "badge" replaces "momentum" (Improving/Watch/Declining/Stable/New/-
-        # instead of Rising/Declining/Stable).
-        momentum = r.get("badge", "—")
+        # instead of Rising/Declining/Stable). The engine uses a bare "-" for
+        # unscored months; normalize to the dashboard's usual em-dash placeholder.
+        badge_raw = r.get("badge", "—")
+        momentum = "—" if badge_raw == "-" else badge_raw
 
         # Competitor slots (sm=rivals[0], car=rivals[1], ted=rivals[2])
         sm_v = comp[m][rivals[0]] if m in comp and len(rivals) > 0 else None
@@ -170,9 +172,10 @@ def _build_data_block(cfg, T, G_data, A, S):
         ted_v = comp[m][rivals[2]] if m in comp and len(rivals) > 2 else None
 
         # Narratives
-        what = (f"BVI {bvi} ({momentum}). "
-                f"Branded impressions {fmt_signed(impr_d)}% MoM, "
-                f"branded clicks {fmt_signed(clk_d)}% MoM, "
+        bvi_disp = bvi if bvi is not None else "—"
+        what = (f"BVI {bvi_disp} ({momentum}). "
+                f"Branded impressions {fmt_signed(impr_d, suf='%')} MoM, "
+                f"branded clicks {fmt_signed(clk_d, suf='%')} MoM, "
                 f"Trends index {fmt_signed(ti_d, pts=True)}.")
         kg_disp = kg if kg is not None else "—"
         cat_primary_disp = cat_primary if cat_primary is not None else "—"
@@ -201,7 +204,7 @@ def _build_data_block(cfg, T, G_data, A, S):
                   ("Search", "Social", "Competitive", "Category")
                   if r.get("dimensions", {}).get(d, {}).get("contribution") is not None}
         DETAIL = {
-            "Search": f"branded impressions {sgn(impr_d)}%, Trends index {sgn(ti_d, suf='pts')}",
+            "Search": f"branded impressions {sgn(impr_d, suf='%')}, Trends index {sgn(ti_d, suf='pts')}",
             "Social": f"engagement rate {sgn(er_d, 2, 'pts')}, follower growth {sgn(gr_d, 2, 'pts')}",
             "Competitive": f"brand share {sgn(share_d, 1, 'pts')} vs {nearest}",
             "Category": f'brand-vs-"{primary}" gap {sgn(_gap_mom_pts(cat, m, pm, primary, brand_key), suf="pts")}',
@@ -222,7 +225,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             move = f", down {abs(bvi_delta)} MoM"
         else:
             move = ", unchanged MoM"
-        why = (f"BVI {bvi}{move}. "
+        why = (f"BVI {bvi_disp}{move}. "
                f"Movement led by {DLAB.get(driver, driver)} ({DETAIL.get(driver, '')}).")
         if rising:
             why += (f' Rising-tide flag active — "{primary}" moved with the brand, '
@@ -627,8 +630,8 @@ _CHART_FIXES = [
      "const _b=RAW.map(m=>m.bvi).filter(v=>v!=null), _lo=Math.min(..._b), "
      "_hi=Math.max(..._b), _pad=Math.max(3,(_hi-_lo)*0.1); "
      "const minV=_lo-_pad, maxV=_hi+_pad, clamp=v=>Math.max(minV,Math.min(maxV,v));"),
-    ("CAT_TRENDS.map((v,i)=>`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`)",
-     "CAT_TRENDS.map((v,i)=>`${xp(i).toFixed(1)},${yp(clamp(v)).toFixed(1)}`)"),
+    ('CAT_TRENDS.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`:null).filter(Boolean).join(" ")',
+     'CAT_TRENDS.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(clamp(v)).toFixed(1)}`:null).filter(Boolean).join(" ")'),
     ("[45,55,65].map(v=>",
      "[Math.round((minV+(maxV-minV)*0.25)/5)*5,Math.round((minV+(maxV-minV)*0.5)/5)*5,"
      "Math.round((minV+(maxV-minV)*0.75)/5)*5].map(v=>"),
