@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Parse a single-month GA4 Traffic Acquisition CSV: Direct vs Organic sessions.
+"""Parse a GA4 Traffic Acquisition CSV: Direct vs Organic sessions.
 
 GA4 Traffic Acquisition exports have no built-in monthly dimension, so a raw
-export can be one of two shapes:
+export can be one of three shapes (BVI_CSV_Schema_Mapping_v1.md Section 5.1):
 
   Shape A: full-range aggregate — one row per channel, no date column,
            covers many months summed together. Useless for MoM scoring.
@@ -10,9 +10,16 @@ export can be one of two shapes:
 
   Shape B: single-month export — one row per channel, date range in the
            CSV header comments ("# Start date: YYYYMMDD"). One file per
-           month. This is the supported format.
+           month. Supported.
+
+  Shape C: Exploration export with a "Year month" dimension column
+           (values like 202504) — one row per channel per month, single
+           file covers every month. Detected by a header column matching
+           "Year month" (case-insensitive, spacing/underscore-insensitive,
+           e.g. "yearMonth"). Supported.
 """
 
+import re
 import sys
 from datetime import datetime
 
@@ -49,8 +56,120 @@ def cell(row):
     return [c.strip().strip('"') for c in row.split(",")]
 
 
+def _find_year_month_col(header):
+    """Index of a 'Year month' dimension column, or None. Case/spacing/
+    underscore-insensitive so "Year month", "Year Month", "yearMonth", and
+    "year_month" all match."""
+    for i, h in enumerate(header):
+        normalized = re.sub(r"[\s_]", "", h.strip().lower())
+        if normalized == "yearmonth":
+            return i
+    return None
+
+
+def _parse_year_month(raw):
+    """Parse a Year month cell ('202504', '2025-04', ...) into 'YYYY-MM'. None if unparseable."""
+    s = str(raw).strip()
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 6:
+        return f"{digits[:4]}-{digits[4:6]}"
+    m = re.match(r"^(\d{4})-(\d{2})$", s)
+    return f"{m.group(1)}-{m.group(2)}" if m else None
+
+
+def _sessions_for_rows(rows, si, name_idx, verbose_log):
+    """Shared Shape B/C extraction: sum Sessions by channel across a set of rows.
+    Returns (direct, organic, total, channel_rows) — same logic Shape B has
+    always used, factored out so Shape C can reuse it per Year-month group.
+    """
+    direct = organic = total = 0
+    found_direct = found_organic = False
+    channel_rows = []
+    for cols in rows:
+        name = cols[name_idx].lower()
+        try:
+            val = int(cols[si])
+        except (ValueError, IndexError):
+            continue
+        channel_rows.append((cols[name_idx], val))
+        total += val
+        if name == "direct":
+            direct = val
+            found_direct = True
+        elif name.startswith("organic"):
+            organic = val
+            found_organic = True
+    verbose_log(f"  channel rows: {channel_rows}")
+    verbose_log(f"  direct={'FOUND' if found_direct else 'not found (0)'} ({direct}), "
+                f"organic={'FOUND' if found_organic else 'not found (0)'} ({organic}), total={total}")
+    return direct, organic, total, channel_rows
+
+
+def _parse_shape_c(header, data_rows, ym_idx, verbose=True):
+    """Shape C: Exploration export with a Year-month dimension column — one
+    row per channel per month, single file covers every month. Returns
+    {month_str: {direct, organic, total, direct_pct}, ...} for every month
+    found. Raises GA4ParseError if the file can't be parsed as Shape C.
+    """
+    log = _log if verbose else (lambda msg: None)
+    log(f"  Shape C (Exploration, Year-month column) — Year month at index {ym_idx}")
+
+    if "Sessions" not in header:
+        log("REJECTED: no 'Sessions' column in header")
+        raise GA4ParseError(
+            f"No 'Sessions' column found in header ({header[:3]}...). "
+            f"Make sure the export includes the Sessions metric."
+        )
+    si = header.index("Sessions")
+
+    # Channel-grouping column: same "accept any header name" rule as Shape B
+    # (spec 5.2), applied to whichever of the first two columns isn't Year month.
+    name_idx = 1 if ym_idx == 0 else 0
+    log(f"  channel column assumed at index {name_idx} (header: {header[name_idx]!r})")
+
+    by_month = {}
+    unparsed_year_months = 0
+    for row in data_rows:
+        cols = cell(row)
+        if len(cols) <= max(ym_idx, si, name_idx):
+            continue
+        month = _parse_year_month(cols[ym_idx])
+        if month is None:
+            unparsed_year_months += 1
+            continue
+        by_month.setdefault(month, []).append(cols)
+
+    if unparsed_year_months:
+        log(f"  {unparsed_year_months} row(s) had an unparseable Year month value — skipped")
+
+    if not by_month:
+        log("REJECTED: no rows with a parseable Year month value")
+        raise GA4ParseError(
+            "Found a 'Year month' column but no rows had a parseable value "
+            "(expected e.g. 202504 or 2025-04)."
+        )
+
+    out = {}
+    for month, rows in sorted(by_month.items()):
+        log(f"  ── month {month} ({len(rows)} row(s))")
+        direct, organic, total, channel_rows = _sessions_for_rows(rows, si, name_idx, log)
+        if not channel_rows:
+            log(f"  skipping {month}: no channel rows with a numeric Sessions value")
+            continue
+        direct_pct = direct / total * 100 if total else 0.0
+        log(f"  ACCEPTED {month}: direct={direct} organic={organic} "
+            f"total={total} direct_pct={direct_pct:.1f}%")
+        out[month] = {"direct": direct, "organic": organic, "total": total, "direct_pct": direct_pct}
+
+    if not out:
+        raise GA4ParseError("No month in this file had usable channel/Sessions data.")
+
+    return out
+
+
 def _parse_file(path, verbose=True):
-    """Parse one GA4 CSV. Returns (month_str, {direct, organic, total, direct_pct}).
+    """Parse one GA4 CSV. Returns {month_str: {direct, organic, total, direct_pct}, ...}
+    — Shape A/B files return at most one month; Shape C files can return many.
 
     Raises GA4ParseError with a user-facing reason on rejection/malformed input.
     """
@@ -69,6 +188,18 @@ def _parse_file(path, verbose=True):
     log(f"  {len(comment_lines)} comment line(s) found:")
     for c in comment_lines:
         log(f"    {c!r}")
+
+    data = [l for l in lines if l.strip() and not l.startswith("#")]
+    if not data:
+        log("REJECTED: no data rows found after stripping comments")
+        raise GA4ParseError("No data rows found in file after the header comments.")
+
+    header = cell(data[0])
+    log(f"  header: {header}")
+
+    ym_idx = _find_year_month_col(header)
+    if ym_idx is not None:
+        return _parse_shape_c(header, data[1:], ym_idx, verbose=verbose)
 
     try:
         start = meta_date(lines, "Start date")
@@ -101,14 +232,6 @@ def _parse_file(path, verbose=True):
 
     log(f"  Shape B (single-month) — target month {start:%Y-%m}")
 
-    data = [l for l in lines if l.strip() and not l.startswith("#")]
-    if not data:
-        log("REJECTED: no data rows found after stripping comments")
-        raise GA4ParseError("No data rows found in file after the header comments.")
-
-    header = cell(data[0])
-    log(f"  header: {header}")
-
     if "Sessions" not in header:
         log("REJECTED: no 'Sessions' column in header")
         raise GA4ParseError(
@@ -117,28 +240,8 @@ def _parse_file(path, verbose=True):
         )
     si = header.index("Sessions")
 
-    direct = organic = total = 0
-    found_direct = found_organic = False
-    channel_rows = []
-    for row in data[1:]:
-        cols = cell(row)
-        name = cols[0].lower()
-        try:
-            val = int(cols[si])
-        except (ValueError, IndexError):
-            continue
-        channel_rows.append((cols[0], val))
-        total += val
-        if name == "direct":
-            direct = val
-            found_direct = True
-        elif name.startswith("organic"):
-            organic = val
-            found_organic = True
-
-    log(f"  channel rows found: {channel_rows}")
-    log(f"  direct={'FOUND' if found_direct else 'not found (0)'} ({direct}), "
-        f"organic={'FOUND' if found_organic else 'not found (0)'} ({organic}), total={total}")
+    rows = [cell(row) for row in data[1:]]
+    direct, organic, total, channel_rows = _sessions_for_rows(rows, si, 0, log)
 
     if not channel_rows:
         log("REJECTED: no channel rows found under the header")
@@ -148,42 +251,45 @@ def _parse_file(path, verbose=True):
     log(f"  ACCEPTED: {start:%Y-%m} → direct={direct} organic={organic} "
         f"total={total} direct_pct={direct_pct:.1f}%")
 
-    return f"{start:%Y-%m}", {
+    return {f"{start:%Y-%m}": {
         "direct": direct, "organic": organic, "total": total,
         "direct_pct": direct_pct,
-    }
+    }}
 
 
 def parse(path):
     """CLI debug helper — prints a human-readable summary for one file."""
     print(f"\n=== {path} ===")
     try:
-        month, d = _parse_file(path, verbose=True)
+        months = _parse_file(path, verbose=True)
     except GA4ParseError as e:
         print(f"REJECTED: {e}")
         return
-    print(f"Month:           {month}")
-    print(f"Direct sessions: {d['direct']:,}")
-    print(f"Organic sessions:{d['organic']:,}")
-    print(f"Total sessions:  {d['total']:,}")
-    print(f"Direct %:        {d['direct_pct']:.1f}%")
+    for month, d in sorted(months.items()):
+        print(f"Month:           {month}")
+        print(f"Direct sessions: {d['direct']:,}")
+        print(f"Organic sessions:{d['organic']:,}")
+        print(f"Total sessions:  {d['total']:,}")
+        print(f"Direct %:        {d['direct_pct']:.1f}%")
 
 
 def load_from_with_diagnostics(paths, verbose=True):
     """Parse each GA4 file, never raising — collects a diagnostic per file.
 
     Returns (data_dict, diagnostics) where data_dict is {YYYY-MM: {...}} for
-    every accepted file, and diagnostics is a list of dicts:
-        {"path": str, "status": "accepted"|"rejected", "reason": str|None, "month": str|None}
+    every accepted file (a Shape C file can contribute several months), and
+    diagnostics is a list of dicts:
+        {"path": str, "status": "accepted"|"rejected", "reason": str|None, "month": list[str]|None}
     """
     out = {}
     diagnostics = []
     for path in paths:
         try:
-            month, data = _parse_file(path, verbose=verbose)
-            out[month] = data
+            months = _parse_file(path, verbose=verbose)
+            out.update(months)
             diagnostics.append({
-                "path": path, "status": "accepted", "reason": None, "month": month,
+                "path": path, "status": "accepted", "reason": None,
+                "month": sorted(months.keys()),
             })
         except GA4ParseError as e:
             diagnostics.append({
