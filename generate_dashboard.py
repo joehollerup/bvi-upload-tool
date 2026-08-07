@@ -99,6 +99,13 @@ def _build_data_block(cfg, T, G_data, A, S):
         brand_key=brand_key, T=T, G=G_for_scoring, A=A, S=S
     )}
 
+    # Dataset-level: does this client's baseline draw on any month inside the
+    # confirmed GSC impressions logging-bug window? Same value on every
+    # result; surfaced once as a single page-level note (not per-month).
+    dataset_gsc_affected = any(
+        r.get("baseline_gsc_impressions_affected") for r in results.values()
+    )
+
     comp_months = sorted(comp)
     months = sorted(set(comp) | set(cat) | set(gsc) | set(S) | set(A))
     window = months[-12:]
@@ -158,6 +165,11 @@ def _build_data_block(cfg, T, G_data, A, S):
         # v2.1: rising_tide is a top-level boolean on the result, not a nested
         # Category signal (the old engine scored rising-tide as a signal itself).
         rising = bool(r.get("rising_tide", False))
+
+        # Confirmed Google GSC impressions logging bug (May 2025 - Apr 2026):
+        # impressions/CTR/avg position are unreliable for this month. Transparency
+        # flag only — does not change any scoring math (score_bvi.FLAG_TEXT).
+        gsc_unreliable = "GSC_IMPRESSIONS_UNRELIABLE" in r.get("flags", [])
 
         bvi = round(r["bvi_score"]) if r.get("bvi_score") is not None else None
         # v2.1: "badge" replaces "momentum" (Improving/Watch/Declining/Stable/New/-
@@ -259,6 +271,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'clicks:{jnum(clk_k)},clicksDelta:{jnum(clk_d,0)},'
             f'ctr:{jnum(ctr.get(m),2)},ctrDelta:{jnum(ctr_d,2)},'
             f'position:{jnum(position.get(m),1)},positionDelta:{jnum(pos_d,1)},'
+            f'gscImpressionsUnreliable:{"true" if gsc_unreliable else "false"},'
             f'trendsIdx:{jnum(kg)},trendsIdxDelta:{jnum(ti_d,0)},trendsYoY:{jnum(yoy,0)},'
             f'directSessions:{jnum(ds)},directSessionsDelta:null,'
             f'directPct:{jnum(dpct)},directPctDelta:null,'
@@ -290,6 +303,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             "catTrends": cat_primary,
             "cat2Trends": cat[m].get(cat2) if m in cat and cat2 else None,
             "cat3Trends": cat[m].get(cat3) if m in cat and cat3 else None,
+            "baselineGscImpressionsAffected": dataset_gsc_affected,
         }
         rows.append((m, obj, storage))
 
@@ -298,6 +312,7 @@ def _build_data_block(cfg, T, G_data, A, S):
     cat_2 = ",".join(str(cat.get(m, {}).get(cat2, "null")) if cat2 else "null" for m, _, _s in rows)
     cat_3 = ",".join(str(cat.get(m, {}).get(cat3, "null")) if cat3 else "null" for m, _, _s in rows)
     raw_js = ",\n  ".join(obj for _, obj, _s in rows)
+    dataset_note_js = "true" if dataset_gsc_affected else "false"
 
     block = (
         "// ── DATA ────────────────────────────────────────────────────────────────────\n"
@@ -307,6 +322,7 @@ def _build_data_block(cfg, T, G_data, A, S):
         f"const CAT_TRENDS3 = [{cat_3}];\n\n"
         f"const RAW = [\n  {raw_js}\n];\n\n"
         "const SURVEYS = [];\n\n"
+        f"const DATASET_NOTE_GSC_IMPRESSIONS = {dataset_note_js};\n\n"
         "// ── STATE ────────────────────────────────────────────────────────────────────\n"
     )
     month_rows = [(m, storage) for m, _, storage in rows]
@@ -708,6 +724,8 @@ def generate_from_stored_rows(client_config, stored_rows):
     cat_2 = ",".join(str(r["cat2Trends"]) if r.get("cat2Trends") is not None else "null" for r in sorted_rows)
     cat_3 = ",".join(str(r["cat3Trends"]) if r.get("cat3Trends") is not None else "null" for r in sorted_rows)
     raw_js = ",\n  ".join(r["obj"] for r in sorted_rows)
+    dataset_gsc_affected = any(r.get("baselineGscImpressionsAffected") for r in sorted_rows)
+    dataset_note_js = "true" if dataset_gsc_affected else "false"
 
     block = (
         "// ── DATA ────────────────────────────────────────────────────────────────────\n"
@@ -717,6 +735,7 @@ def generate_from_stored_rows(client_config, stored_rows):
         f"const CAT_TRENDS3 = [{cat_3}];\n\n"
         f"const RAW = [\n  {raw_js}\n];\n\n"
         "const SURVEYS = [];\n\n"
+        f"const DATASET_NOTE_GSC_IMPRESSIONS = {dataset_note_js};\n\n"
         "// ── STATE ────────────────────────────────────────────────────────────────────\n"
     )
     return _apply_template(block, cfg)

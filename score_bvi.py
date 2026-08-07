@@ -104,6 +104,48 @@ COMPETITIVE_W = {"brand_share": 0.50, "gap_to_nearest": 0.30,
 CATEGORY_W = {"category_gap": 0.60, "category_share": 0.40}
 
 # ---------------------------------------------------------------------------
+# GSC IMPRESSIONS LOGGING BUG (confirmed by Google) -- transparency flag only
+# ---------------------------------------------------------------------------
+# Google confirmed a logging error inflated Search Console impressions for
+# ALL properties from 2025-05-13 through 2026-04-27. Clicks were unaffected;
+# CTR and average position are DERIVED from impressions and are therefore
+# also unreliable in this window. Google has stated the historical data will
+# NOT be corrected retroactively.
+#
+# This does not change any scoring math, weight, or signal calculation -- it
+# only adds a flag so the affected months (and any baseline built from them)
+# are visibly caveated, per the spec's "all flags are displayed, never
+# suppressed" rule (Section 3).
+GSC_IMPRESSIONS_BUG_START = "2025-05"   # inclusive, YYYY-MM
+GSC_IMPRESSIONS_BUG_END = "2026-04"     # inclusive, YYYY-MM
+
+# Series whose season-neutral baseline (2.5) is built directly from GSC
+# impressions or a metric derived from it.
+GSC_IMPRESSIONS_BASELINE_KEYS = ("search_impr", "search_clicks", "search_position")
+
+FLAG_TEXT = {
+    "GSC_IMPRESSIONS_UNRELIABLE": (
+        "GSC impressions, CTR, and average position are unreliable for this "
+        "month due to a confirmed Google logging error (May 2025 - April "
+        "2026). Branded clicks are unaffected."
+    ),
+}
+
+DATASET_NOTE_TEXT = {
+    "baseline_gsc_impressions_affected": (
+        "This client's baseline includes months affected by the GSC "
+        "impressions logging error. Interpret Search Demand movement with "
+        "caution."
+    ),
+}
+
+
+def _in_gsc_impressions_bug_window(month_key):
+    """True if month_key (YYYY-MM) falls in the confirmed GSC logging-bug window."""
+    return GSC_IMPRESSIONS_BUG_START <= month_key <= GSC_IMPRESSIONS_BUG_END
+
+
+# ---------------------------------------------------------------------------
 # SEASONAL-ADJUSTMENT LAYER (Spec 0.6, 3.2)  --  PENDING IRIS DATA
 # ---------------------------------------------------------------------------
 # Structure: SEASONAL_INDEX[sub_vertical][calendar_month 1-12][family] = factor
@@ -707,9 +749,19 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
     }
 
     base, base_locked = {}, {}
+    baseline_windows_used = {}
     for name, s in ser.items():
-        b, _, locked = baseline_mean(s, months)
+        b, used, locked = baseline_mean(s, months)
         base[name], base_locked[name] = b, locked
+        baseline_windows_used[name] = used
+
+    # Dataset-level: does any GSC-derived baseline draw on a month inside the
+    # confirmed impressions logging-bug window? (Spec: flags never suppressed.)
+    baseline_gsc_impressions_affected = any(
+        _in_gsc_impressions_bug_window(m)
+        for key in GSC_IMPRESSIONS_BASELINE_KEYS
+        for m in baseline_windows_used.get(key, set())
+    )
 
     means = {t: statistics.fmean([cat[mo][t] for mo in cat
                                   if cat[mo].get(t) is not None])
@@ -799,6 +851,8 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
               if primary else False)
         if rt:
             flags.append("RISING_TIDE")
+        if m in gsc and _in_gsc_impressions_bug_window(m):
+            flags.append("GSC_IMPRESSIONS_UNRELIABLE")
         if _provisional_baseline(active, base_locked):
             flags.append("PROVISIONAL_BASELINE")
         if not seasonal_active:
@@ -839,6 +893,7 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
             "normalized_weights": normw,
             "rising_tide": rt,
             "flags": sorted(set(flags)),
+            "baseline_gsc_impressions_affected": baseline_gsc_impressions_affected,
             "primary_category": primary,
             "dimensions": {d: {
                 "contribution": dim_objs[d]["contribution"],
