@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
-"""BVI scoring engine v2.1 - baseline-relative, season-neutral, deseasonalized.
+"""BVI scoring engine v2.2 - baseline-relative, per-metric baseline windows.
 
-Implements BVI Scoring Spec v2.1. Replaces the month-over-month engine.
+Implements BVI Scoring Spec v2.2. Replaces the month-over-month engine.
 
-Change from v2.0 (the seasonality fix)
-    The baseline is now the SEASON-NEUTRAL FULL-CYCLE MEAN: the mean of the
-    client's first full cycle of backfill (up to 12 months), locked once a
-    full cycle exists. A whole-year average contains every season, so the
-    reference cannot sit on an inflated (Q4) or deflated (Q1) month. Every
-    month that has data is scored against that reference; nothing is excluded.
+Change from v2.1 (per-metric baseline windows supersede SEASONAL_INDEX)
+    v2.1 handled per-month seasonality with a SEASONAL-ADJUSTMENT LAYER
+    (SEASONAL_INDEX) pending a pooled cross-client data pull. Clancy has
+    approved a different, simpler fix: lengthen the baseline window itself
+    for Trends/GA4/Social signals to 24 months (two full annual cycles), so
+    every calendar month is represented twice in the baseline mean and each
+    month's own seasonal component is absorbed directly, with no external
+    coefficient table needed. GSC-derived signals stay at 12 months because
+    Google caps Search Console at a rolling 16-month reporting window -- a
+    24-month requirement would mean that baseline could never accumulate
+    enough months to lock. SEASONAL_INDEX and its supporting code are left
+    in place but are now permanently inert (see the block below); this is
+    not "still pending," it is superseded.
 
-    Per-month seasonality (a scored November reading high just for being
-    November) is handled by a SEASONAL-ADJUSTMENT LAYER (see SEASONAL_INDEX).
-    That table is intentionally EMPTY at launch and is a no-op until populated
-    from pooled fashion-client data (the Iris pull). When empty, the engine
-    still removes anchor bias via the season-neutral baseline; it does not yet
-    remove each month's own seasonal component. Interpret trajectory over a
-    full cycle, not single months, until the table is loaded (Spec 0.6, 3.2).
+Change from v2.0 (the seasonality fix, still true of the baseline itself)
+    The baseline is the SEASON-NEUTRAL FULL-CYCLE MEAN: the mean of the
+    client's first full window of backfill, locked once that window exists.
+    A whole-year (or two) mean contains every season, so the reference
+    cannot sit on an inflated (Q4) or deflated (Q1) month. Every month that
+    has data is scored against that reference; nothing is excluded.
 
 Two-layer design (Spec Section 10)
     ENGINE (this file) computes in log-growth and percentage-point space,
@@ -60,9 +66,51 @@ import parse_social
 # CONSTANTS
 # ===========================================================================
 
-BASELINE_CYCLE = 12           # months in a full seasonal cycle; baseline is
-                              #   the mean of the first BASELINE_CYCLE months
-                              #   and locks once that many exist (Spec 2.5)
+# Per-source baseline windows (Spec 2.5). Approved by Clancy: replaces the
+# single global BASELINE_CYCLE=12 with per-metric windows, and supersedes
+# the SEASONAL_INDEX pending-data plan for the signals it covers (see the
+# SEASONAL-ADJUSTMENT LAYER block below).
+#
+# GSC stays at 12 months. Google caps Search Console at a ROLLING 16-month
+# reporting window: by the time a 17th month of history would exist, month 1
+# has already aged out of what GSC will ever return again. A 24-month
+# requirement would mean the GSC baseline could never accumulate 24 present
+# values and would never lock. 12 months locks comfortably inside the
+# 16-month cap, with margin for onboarding timing.
+#
+# Trends / GA4 / Social move to 24 months. A 24-month baseline mean spans
+# two full annual cycles, so every calendar month is represented twice in
+# the mean -- this absorbs each month's own seasonal component directly,
+# which is what SEASONAL_INDEX was built to approximate from a pooled
+# cross-client panel. The longer baseline supersedes that need.
+BASELINE_CYCLE_GSC = 12        # branded impressions, branded clicks, avg position
+BASELINE_CYCLE_TRENDS = 24     # brand Trends index, brand share, gaps, category share/gap
+BASELINE_CYCLE_GA4 = 24        # direct sessions, organic sessions, direct % of sessions
+BASELINE_CYCLE_SOCIAL = 24     # engagement rate, follower growth rate, organic reach
+
+# Per-series baseline window, keyed the same as `ser`/`derived` in compute().
+# Branded CTR is not listed: it is a display-only ratio of impressions/clicks
+# computed in the dashboard, not an independently scored/baselined signal here.
+BASELINE_CYCLES = {
+    "search_impr": BASELINE_CYCLE_GSC,
+    "search_clicks": BASELINE_CYCLE_GSC,
+    "search_position": BASELINE_CYCLE_GSC,
+    "search_trends": BASELINE_CYCLE_TRENDS,
+    "dig_direct": BASELINE_CYCLE_GA4,
+    "dig_organic": BASELINE_CYCLE_GA4,
+    "dig_direct_pct": BASELINE_CYCLE_GA4,
+    "soc_er": BASELINE_CYCLE_SOCIAL,
+    "soc_gr": BASELINE_CYCLE_SOCIAL,
+    "soc_reach": BASELINE_CYCLE_SOCIAL,
+    "comp_share": BASELINE_CYCLE_TRENDS,
+    "comp_gap": BASELINE_CYCLE_TRENDS,
+    "comp_index": BASELINE_CYCLE_TRENDS,
+    "cat_gap": BASELINE_CYCLE_TRENDS,
+    "cat_share": BASELINE_CYCLE_TRENDS,
+    "cat_brand": BASELINE_CYCLE_TRENDS,
+    "cat_primary": BASELINE_CYCLE_TRENDS,
+}
+
 NEUTRAL = 50.0                # BVI at baseline (no movement)
 SIGNAL_CAP = 40.0             # max +/- BVI points one signal may contribute (3.3)
 DISPLAY_MIN, DISPLAY_MAX = 0.0, 100.0
@@ -146,26 +194,30 @@ def _in_gsc_impressions_bug_window(month_key):
 
 
 # ---------------------------------------------------------------------------
-# SEASONAL-ADJUSTMENT LAYER (Spec 0.6, 3.2)  --  PENDING IRIS DATA
+# SEASONAL-ADJUSTMENT LAYER (Spec v2.1 0.6, 3.2)  --  SUPERSEDED, PERMANENTLY INERT
 # ---------------------------------------------------------------------------
-# Structure: SEASONAL_INDEX[sub_vertical][calendar_month 1-12][family] = factor
-#   factor = the typical multiplicative level of that family in that calendar
-#   month RELATIVE TO THE ANNUAL MEAN. Example: 1.20 means "this family
-#   normally runs 20% above its annual mean in this month". 1.00 = no effect.
-# The engine subtracts ln(factor) from the log-movement of each volume signal
-# so that a month sitting exactly at its seasonal norm scores neutral and only
-# growth BEYOND the seasonal norm scores positive.
+# v2.1 built this layer to subtract a per-calendar-month seasonal coefficient
+# from volume signals, pending a pooled cross-client data pull. v2.2
+# supersedes that plan: BASELINE_CYCLE_TRENDS/GA4/SOCIAL above lengthen the
+# baseline window for those same signal families to 24 months (two full
+# annual cycles), which absorbs each month's own seasonal component directly
+# in the baseline mean. There is no longer a pooled coefficient table to
+# populate for these signals.
 #
-# EMPTY = NO-OP. With the table empty (as at launch), every offset is 0 and
-# the engine falls back to season-neutral-baseline-only behaviour. Populate
-# per sub_vertical from the pooled fashion data; no code change is required,
-# only this table and (optionally) a sensitivity retune.
+# The code below is INTENTIONALLY LEFT IN PLACE, unchanged, and PERMANENTLY
+# INERT: SEASONAL_INDEX must stay empty. Do not populate it -- doing so would
+# double-correct seasonality (once via the 24-month baseline, again via this
+# layer) on top of signals it was never meant to touch. It is kept only so a
+# future spec revision has the mechanism available if ever needed again.
 #
-# Only the volume signals below are seasonally adjusted. Search brand Trends
-# index is deseasonalized against the CATEGORY instead (never both). Point /
-# share / gap / rate signals are near season-neutral and are not adjusted here
-# unless the data later shows otherwise.
-SEASONAL_INDEX = {}   # populate from Iris pull; see handoff doc
+# Structure (historical, for reference): SEASONAL_INDEX[sub_vertical]
+# [calendar_month 1-12][family] = factor, where factor is the typical
+# multiplicative level of that family in that calendar month relative to its
+# annual mean. The engine subtracts ln(factor) from the log-movement of each
+# volume signal. EMPTY = NO-OP: every offset is 0, so build_month_seasonals()
+# always returns {} and every seas.get(...) call in the scorers below falls
+# through to its 0.0 default.
+SEASONAL_INDEX = {}   # PERMANENTLY EMPTY -- superseded by 24-month baselines (v2.2)
 
 # signal name -> seasonal family bucket (only these signals are adjusted)
 SEASONAL_SIGNALS = {
@@ -186,11 +238,13 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def baseline_mean(series, months, cycle=BASELINE_CYCLE):
+def baseline_mean(series, months, cycle=BASELINE_CYCLE_GSC):
     """Season-neutral baseline (Spec 2.5).
 
     Baseline = mean of the earliest up-to-`cycle` present values. Locked once
     at least `cycle` present values exist; provisional (expanding) before that.
+    `cycle` is now per-series (v2.2, BASELINE_CYCLES) -- callers in compute()
+    always pass it explicitly; the default here is only a defensive fallback.
     Returns (baseline_value, used_month_set, locked_bool).
     """
     present = [m for m in months if series.get(m) is not None]
@@ -751,7 +805,7 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
     base, base_locked = {}, {}
     baseline_windows_used = {}
     for name, s in ser.items():
-        b, used, locked = baseline_mean(s, months)
+        b, used, locked = baseline_mean(s, months, cycle=BASELINE_CYCLES[name])
         base[name], base_locked[name] = b, locked
         baseline_windows_used[name] = used
 
@@ -807,7 +861,7 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
         "cat_primary": {m: cat[m].get(primary) for m in cat} if primary else {},
     }
     for name, s in derived.items():
-        b, _, locked = baseline_mean(s, months)
+        b, _, locked = baseline_mean(s, months, cycle=BASELINE_CYCLES[name])
         base[name], base_locked[name] = b, locked
 
     seasonal_active = bool(SEASONAL_INDEX)
@@ -855,8 +909,11 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
             flags.append("GSC_IMPRESSIONS_UNRELIABLE")
         if _provisional_baseline(active, base_locked):
             flags.append("PROVISIONAL_BASELINE")
-        if not seasonal_active:
-            flags.append("SEASONAL_PENDING")
+        unlocked_dims = _unlocked_dimensions(active, base_locked)
+        baseline_not_locked_text = None
+        if unlocked_dims:
+            flags.append("BASELINE_NOT_LOCKED")
+            baseline_not_locked_text = _baseline_not_locked_text(unlocked_dims)
         if bvi is not None and len(active) < 2:
             flags.append("INSUFFICIENT_TIER")
             bvi = None
@@ -894,6 +951,7 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
             "rising_tide": rt,
             "flags": sorted(set(flags)),
             "baseline_gsc_impressions_affected": baseline_gsc_impressions_affected,
+            "baseline_not_locked_text": baseline_not_locked_text,
             "primary_category": primary,
             "dimensions": {d: {
                 "contribution": dim_objs[d]["contribution"],
@@ -925,6 +983,26 @@ def _provisional_baseline(active, base_locked):
             if k in base_locked and base_locked[k] is False:
                 return True
     return False
+
+
+def _unlocked_dimensions(active, base_locked):
+    """Names of active dimensions with at least one baseline still expanding
+    (not yet at its full per-metric window, BASELINE_CYCLES). Order matches
+    DIMS so the flag text is stable run to run."""
+    unlocked = []
+    for d in active:
+        if any(base_locked.get(k) is False for k in _DIM_BASELINE_KEYS.get(d, [])):
+            unlocked.append(d)
+    return unlocked
+
+
+def _baseline_not_locked_text(unlocked_dims):
+    """Human-readable BASELINE_NOT_LOCKED text naming the accumulating dimensions."""
+    if not unlocked_dims:
+        return None
+    names = ", ".join(unlocked_dims)
+    return (f"Baseline still accumulating for: {names}. This score is running "
+            f"against a moving reference until the full baseline window is reached.")
 
 
 def _data_gap_flags(m, gsc, comp, cat, ga4, soc):
@@ -981,10 +1059,16 @@ def main():
         return
     first = results[0]
     print("Primary category term: %s" % first["primary_category"])
-    print("Seasonal adjustment active: %s"
+    print("Seasonal adjustment active: %s (permanently inert, v2.2 -- see BASELINE_CYCLES)"
           % first["seasonal_adjustment_active"])
     print("Months: %d (%s -> %s)\n"
           % (len(results), results[0]["month"], results[-1]["month"]))
+
+    print("Per-metric baseline windows (Spec 2.5, v2.2):")
+    for name, cycle in BASELINE_CYCLES.items():
+        print("  %-15s %2d months" % (name, cycle))
+    print()
+
     head = ("%-9s%7s%9s%7s%9s   %-9s   %s"
             % ("Month", "BVI", "MoM", "Band", "Badge", "Tier", "Flags"))
     print(head)
@@ -996,6 +1080,21 @@ def main():
         print("%-9s%7s%9s%7s%9s   %-9s   %s"
               % (r["month"], bvi, mom, band, r["badge"],
                  r["confidence_tier"], " ".join(r["flags"]) or "-"))
+        if r.get("baseline_not_locked_text"):
+            print("           -> %s" % r["baseline_not_locked_text"])
+
+    print("\nDimension baseline lock status (as of the last scored month):")
+    last = results[-1]
+    last_text = last.get("baseline_not_locked_text") or ""
+    last_active = last.get("active") or []
+    for d in DIMS:
+        if d not in last_active:
+            status = "inactive/no data this month"
+        elif d in last_text:
+            status = "still accumulating (not yet locked)"
+        else:
+            status = "locked"
+        print("  %-13s %s" % (d, status))
 
 
 if __name__ == "__main__":

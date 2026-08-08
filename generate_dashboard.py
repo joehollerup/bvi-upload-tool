@@ -171,6 +171,11 @@ def _build_data_block(cfg, T, G_data, A, S):
         # flag only — does not change any scoring math (score_bvi.FLAG_TEXT).
         gsc_unreliable = "GSC_IMPRESSIONS_UNRELIABLE" in r.get("flags", [])
 
+        # v2.2: BASELINE_NOT_LOCKED — at least one active dimension's baseline
+        # hasn't reached its full per-metric window yet (score_bvi.BASELINE_CYCLES),
+        # so the score is running against a still-expanding reference this month.
+        baseline_not_locked_text = r.get("baseline_not_locked_text")
+
         bvi = round(r["bvi_score"]) if r.get("bvi_score") is not None else None
         # v2.1: "badge" replaces "momentum" (Improving/Watch/Declining/Stable/New/-
         # instead of Rising/Declining/Stable). The engine uses a bare "-" for
@@ -272,6 +277,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'ctr:{jnum(ctr.get(m),2)},ctrDelta:{jnum(ctr_d,2)},'
             f'position:{jnum(position.get(m),1)},positionDelta:{jnum(pos_d,1)},'
             f'gscImpressionsUnreliable:{"true" if gsc_unreliable else "false"},'
+            f'baselineNotLockedText:{js_str(baseline_not_locked_text) if baseline_not_locked_text else "null"},'
             f'trendsIdx:{jnum(kg)},trendsIdxDelta:{jnum(ti_d,0)},trendsYoY:{jnum(yoy,0)},'
             f'directSessions:{jnum(ds)},directSessionsDelta:null,'
             f'directPct:{jnum(dpct)},directPctDelta:null,'
