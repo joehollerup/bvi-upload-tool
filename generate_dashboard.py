@@ -220,6 +220,13 @@ def _build_data_block(cfg, T, G_data, A, S):
         dscore = {d: r["dimensions"][d]["contribution"] for d in
                   ("Search", "Social", "Competitive", "Category")
                   if r.get("dimensions", {}).get(d, {}).get("contribution") is not None}
+
+        # v2.2: per-dimension baseline-relative contribution (BVI points,
+        # neutral=0), exposed so the Signal status panel can derive its badge
+        # from the same baseline-relative value the rest of the UI shows,
+        # instead of recomputing direction from raw signal deltas.
+        contrib = {d: r.get("dimensions", {}).get(d, {}).get("contribution") for d in
+                   ("Search", "Digital", "Social", "Competitive", "Category")}
         DETAIL = {
             "Search": f"branded impressions {sgn(impr_d, suf='%')}, Trends index {sgn(ti_d, suf='pts')}",
             "Social": f"engagement rate {sgn(er_d, 2, 'pts')}, follower growth {sgn(gr_d, 2, 'pts')}",
@@ -293,6 +300,9 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'brandShare:{jnum(share,0)},brandShareDelta:{jnum(share_d,0)},'
             f'catTrends:{jnum(cat_primary)},catVol:null,catVolDelta:null,'
             f'risingTide:{"true" if rising else "false"},'
+            f'searchContribution:{jnum(contrib["Search"])},digitalContribution:{jnum(contrib["Digital"])},'
+            f'socialContribution:{jnum(contrib["Social"])},competitiveContribution:{jnum(contrib["Competitive"])},'
+            f'categoryContribution:{jnum(contrib["Category"])},'
             f'mentionVol:null,mentionVolDelta:null,sentimentPct:null,sentimentDelta:null,'
             f'sov:null,sovDelta:null,earnedReach:null,influencerReach:null,emv:null,'
             f'kgSentiment:null,smSentiment:null,carSentiment:null,tedSentiment:null,'
@@ -423,10 +433,10 @@ def _get_repl_list(cfg):
          '${SCALES.filter(sc=>spec.signals.some(sig=>sig.s.toLowerCase()'
          '.startsWith(sc.name.split(\' \')[0].toLowerCase()))).map(sc=>`<div class="card" style="padding:10px 12px">'),
         # UX-3a: Digital no-data guard
-        ('if(dimId==="digital") {\n    const pos=[d.directPctDelta',
+        ('if(dimId==="digital") {\n    const status = statusFromContribution(d.digitalContribution);',
          'if(dimId==="digital") {\n'
          '    if(d.directSessions==null&&d.organicSessions==null)return null;\n'
-         '    const pos=[d.directPctDelta'),
+         '    const status = statusFromContribution(d.digitalContribution);'),
         # UX-3b: Digital tab message
         ('function renderDigital(d) {\n  return `<div class="grid2">',
          'function renderDigital(d) {\n'
@@ -459,15 +469,17 @@ def _get_repl_list(cfg):
          'style="width:14px;height:14px;border-radius:50%;background:rgba(171,171,171,.25);'
          'display:inline-flex;align-items:center;justify-content:center;'
          'font-size:10px;color:#ABABAB;cursor:pointer;font-weight:700">?</span>'),
-        # UX-5a: vs-baseline text per dimension
+        # UX-5a: vs-baseline text per dimension — v2.2: derive from the same
+        # per-dimension baseline-relative contribution that drives info.status,
+        # so the badge direction and the percentage beside it can never disagree.
         ('const factors = info.factors || [];',
          'const factors = info.factors || [];\n'
          '  const momText = {'
-         'search:d.impressionsDelta!=null?(d.impressionsDelta>0?"+":"")+d.impressionsDelta+"% vs baseline":null,'
-         'digital:d.directPctDelta!=null?(d.directPctDelta>0?"+":"")+d.directPctDelta+" pts vs baseline":null,'
-         'social:d.engagementRateDelta!=null?((d.engagementRateDelta>0?"+":"")+parseFloat(d.engagementRateDelta).toFixed(1)+" pts vs baseline"):null,'
-         'competitive:d.brandShareDelta!=null?(d.brandShareDelta>0?"+":"")+d.brandShareDelta+" pts vs baseline":null,'
-         'category:prev&&d.catTrends!=null&&prev.catTrends!=null?((d.catTrends-prev.catTrends>=0?"+":"")+(d.catTrends-prev.catTrends)+" pts vs baseline"):null'
+         'search:d.searchContribution!=null?(d.searchContribution>0?"+":"")+d.searchContribution+" pts vs baseline":null,'
+         'digital:d.digitalContribution!=null?(d.digitalContribution>0?"+":"")+d.digitalContribution+" pts vs baseline":null,'
+         'social:d.socialContribution!=null?(d.socialContribution>0?"+":"")+d.socialContribution+" pts vs baseline":null,'
+         'competitive:d.competitiveContribution!=null?(d.competitiveContribution>0?"+":"")+d.competitiveContribution+" pts vs baseline":null,'
+         'category:d.categoryContribution!=null?(d.categoryContribution>0?"+":"")+d.categoryContribution+" pts vs baseline":null'
          '}[dimId]||null;'),
         # UX-5b: append vs-baseline text to status badge
         ('white-space:nowrap">${info.status}</span>',

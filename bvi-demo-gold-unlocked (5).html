@@ -128,14 +128,20 @@ function getStaleness(surveyIdx, curIdx) {
 
 // ── SIGNAL STATUS LOGIC ──────────────────────────────────────────────────────
 function calcDimStatus(dimId, d, prev) {
+  // v2.2: status is derived from each dimension's baseline-relative
+  // contribution (BVI points, neutral=0) — the same value the rest of the
+  // dashboard displays — so a badge can never disagree with its own delta.
+  // Deadzone keeps small noise around baseline reading as "Stable" rather
+  // than flapping between Improving/Declining.
+  const SIGNAL_DEADZONE = 3;
+  const statusFromContribution = c => c==null?"Stable":c>SIGNAL_DEADZONE?"Improving":c<-SIGNAL_DEADZONE?"Declining":"Stable";
+
   if(dimId==="search") {
     if(d.impressions==null&&d.clicks==null&&d.trendsIdx==null) return null;
     const impPct = d.impressionsDelta!=null?`${(d.impressionsDelta>0?"+":"")+d.impressionsDelta}%`:"—";
     const clkPct = d.clicksDelta!=null?`${(d.clicksDelta>0?"+":"")+d.clicksDelta}%`:"—";
     const trendsDisp = d.trendsIdx!=null?`${d.trendsIdx}/100`:"—";
     const posDisp = d.position!=null?`${d.position}`:"—";
-    const deltas=[d.impressionsDelta,d.clicksDelta,d.trendsIdxDelta].filter(x=>x!=null);
-    const pos=deltas.filter(x=>x>0).length, neg=deltas.filter(x=>x<0).length;
     if(d.risingTide) return {status:"Watch",
       headline:`Trends index ${trendsDisp} but category rising in parallel`,
       factors:[
@@ -144,7 +150,8 @@ function calcDimStatus(dimId, d, prev) {
         {label:"Category context",val:"Rising tide detected",positive:false,note:"Category rising alongside brand — gains may not be brand-specific"}
       ],
       method:"Watch applied when category index moves in the same direction as brand, reducing confidence that gains are brand-driven."};
-    if(pos>=2) return {status:"Improving",
+    const status = statusFromContribution(d.searchContribution);
+    if(status==="Improving") return {status,
       headline:`Branded impressions ${impPct}, Trends index ${trendsDisp}`,
       factors:[
         {label:"Branded impressions",val:`${impPct} vs baseline`,positive:(d.impressionsDelta||0)>0},
@@ -152,15 +159,15 @@ function calcDimStatus(dimId, d, prev) {
         {label:"Avg position",val:posDisp,positive:(d.positionDelta||0)<=0,note:"Lower = better ranking"},
         {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0}
       ],
-      method:"Improving = majority of branded impressions, clicks, and Trends index moving positively vs baseline."};
-    if(neg>=2) return {status:"Declining",
+      method:"Status from Search's baseline-relative contribution to the BVI score. Improving = contribution above baseline."};
+    if(status==="Declining") return {status,
       headline:`Branded impressions ${impPct}, Trends index ${trendsDisp}`,
       factors:[
         {label:"Branded impressions",val:`${impPct} vs baseline`,positive:false},
         {label:"Branded clicks",val:`${clkPct} vs baseline`,positive:false},
         {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0}
       ],
-      method:"Declining = majority of branded impressions, clicks, and Trends index moving negatively vs baseline."};
+      method:"Status from Search's baseline-relative contribution to the BVI score. Declining = contribution below baseline."};
     return {status:"Stable",
       headline:`Branded impressions ${impPct}, Trends index ${trendsDisp}`,
       factors:[
@@ -168,26 +175,25 @@ function calcDimStatus(dimId, d, prev) {
         {label:"Branded clicks",val:`${clkPct} vs baseline`,positive:(d.clicksDelta||0)>0},
         {label:"Google Trends index",val:trendsDisp,positive:(d.trendsIdxDelta||0)>=0}
       ],
-      method:"Stable = mixed or flat signals with no clear directional trend."};
+      method:"Status from Search's baseline-relative contribution to the BVI score. Stable = contribution within the baseline deadzone."};
   }
   if(dimId==="digital") {
-    const pos=[d.directPctDelta,d.brandedOrganicDelta].filter(x=>x!=null&&x>0).length;
-    const neg=[d.directPctDelta,d.brandedOrganicDelta].filter(x=>x!=null&&x<0).length;
-    const status=pos>=2?"Improving":neg>=2?"Declining":"Stable";
+    const status = statusFromContribution(d.digitalContribution);
+    const positive = (d.digitalContribution||0) >= 0;
     return {status,
-      headline:`Direct traffic ${d.directPct}% of sessions, branded organic split ${d.brandedOrganic}%`,
+      headline:`Direct traffic ${d.directPct!=null?d.directPct+"%":"—"} of sessions, branded organic split ${d.brandedOrganic!=null?d.brandedOrganic+"%":"—"}`,
       factors:[
-        {label:"Direct sessions",val:d.directSessionsDelta!=null?`${(d.directSessionsDelta>0?"+":"")+d.directSessionsDelta}%`:"--",positive:(d.directSessionsDelta||0)>=0},
-        {label:"Direct % of total",val:`${d.directPct}%`,positive:(d.directPctDelta||0)>=0},
-        {label:"Total organic sessions",val:d.organicSessionsDelta!=null?`${(d.organicSessionsDelta>0?"+":"")+d.organicSessionsDelta}%`:"--",positive:(d.organicSessionsDelta||0)>=0},
-        {label:"Branded organic split",val:`${d.brandedOrganic}%`,positive:(d.brandedOrganicDelta||0)>=0}
+        {label:"Direct sessions",val:d.directSessions!=null?`${d.directSessions.toLocaleString()}K`:"—",positive},
+        {label:"Direct % of total",val:d.directPct!=null?`${d.directPct}%`:"—",positive},
+        {label:"Total organic sessions",val:d.organicSessions!=null?`${d.organicSessions.toLocaleString()}K`:"—",positive},
+        {label:"Branded organic split",val:d.brandedOrganic!=null?`${d.brandedOrganic}%`:"—",positive}
       ],
-      method:"Status from vs-baseline direction of direct traffic % and branded organic split. These most directly reflect brand recall."};
+      method:"Status from Digital's baseline-relative contribution to the BVI score. Above baseline = Improving, below = Declining, near baseline = Stable."};
   }
   if(dimId==="social") {
     if(!d.followerGrowthRate) return null;
     const erD=d.engagementRateDelta||0, grD=d.followerGrowthRateDelta||0;
-    const status=erD>0&&grD>=0?"Improving":erD<0&&grD<0?"Declining":(erD<0||grD<0)?"Watch":"Stable";
+    const status = statusFromContribution(d.socialContribution);
     return {status,
       headline:`Engagement rate ${d.engagementRate!=null?d.engagementRate+"%":"—"}, follower growth ${d.followerGrowthRate}% vs baseline`,
       factors:[
@@ -196,7 +202,7 @@ function calcDimStatus(dimId, d, prev) {
         {label:"Organic reach",val:d.reach!=null?`${d.reach}K`:"—",positive:true},
         {label:"Engagement rate",val:d.engagementRate!=null?`${d.engagementRate}%`:"—",positive:erD>=0,note:erD<0?"Declining engagement — watch audience quality":""}
       ],
-      method:"Primary: engagement rate vs baseline. Secondary: follower growth rate vs baseline. Engagement weighted higher as it reflects active audience interest."};
+      method:"Status from Social's baseline-relative contribution to the BVI score. Above baseline = Improving, below = Declining, near baseline = Stable."};
   }
   if(dimId==="competitive") {
     if(d.kgTrends==null||d.brandShare==null) return null;
@@ -205,7 +211,7 @@ function calcDimStatus(dimId, d, prev) {
     const gapNow=d.kgTrends-Math.max(smNow,carNow,tedNow);
     const gapPrev=(prev&&prev.kgTrends!=null)?prev.kgTrends-Math.max(prev.smTrends??0,prev.carTrends??0,prev.tedTrends??0):gapNow;
     const gapChg=gapNow-gapPrev;
-    const status=shareD>=2?"Improving":shareD<=-3?"Declining":gapChg<-3?"Watch":"Stable";
+    const status = statusFromContribution(d.competitiveContribution);
     return {status,
       headline:`#1 position, ${d.brandShare}% share of branded search, Trends index ${d.kgTrends}`,
       factors:[
@@ -214,7 +220,21 @@ function calcDimStatus(dimId, d, prev) {
         {label:"Share of branded search",val:`${d.brandShare}%`,positive:shareD>=0},
         {label:"Brand Trends index vs baseline",val:d.trendsIdxDelta!=null?`${(d.trendsIdxDelta>0?"+":"")+d.trendsIdxDelta}%`:"--",positive:(d.trendsIdxDelta||0)>=0}
       ],
-      method:"Primary: change in share of branded search vs baseline. Secondary: gap to nearest competitor Trends index."};
+      method:"Status from Competitive's baseline-relative contribution to the BVI score. Above baseline = Improving, below = Declining, near baseline = Stable."};
+  }
+  if(dimId==="category") {
+    if(d.catTrends==null&&d.trendsIdx==null) return null;
+    const gap = (d.trendsIdx!=null&&d.catTrends!=null) ? (d.trendsIdx-d.catTrends) : null;
+    const status = statusFromContribution(d.categoryContribution);
+    return {status,
+      headline:`Brand Trends index ${d.trendsIdx!=null?d.trendsIdx:"—"} vs category ${d.catTrends!=null?d.catTrends:"—"}${d.risingTide?" — rising tide detected":""}`,
+      factors:[
+        {label:"Brand Trends index",val:d.trendsIdx!=null?`${d.trendsIdx}/100`:"—",positive:(d.trendsIdxDelta||0)>=0},
+        {label:"Primary category index",val:d.catTrends!=null?`${d.catTrends}/100`:"—",positive:true},
+        {label:"Brand vs category gap",val:gap!=null?`${gap>0?"+":""}${gap} pts`:"—",positive:gap==null?true:gap>=0},
+        {label:"Rising tide",val:d.risingTide?"Active":"Not detected",positive:!d.risingTide,note:d.risingTide?"Category moving with the brand — some of the shift may not be brand-specific":""}
+      ],
+      method:"Status from Category's baseline-relative contribution to the BVI score. Above baseline = Improving, below = Declining, near baseline = Stable."};
   }
   if(dimId==="listening") {
     if(!d.mentionVol) return null;
@@ -716,6 +736,7 @@ function render() {
     ${dimRow("Digital presence","digital",d,prev,"base",false)}
     ${dimRow("Organic social","social",d,prev,"base",!d.followerGrowthRate)}
     ${dimRow("Competitive position","competitive",d,prev,"base",false)}
+    ${dimRow("Category context","category",d,prev,"base",d.catTrends==null&&d.trendsIdx==null)}
     ${isSilver?dimRow("Paid brand efficiency","paid",d,prev,"silver",!d.brandedCpmGoogle):dimRow("Paid brand efficiency",null,d,prev,"silver",true)}
     ${isGold?dimRow("Direct awareness","awareness",d,prev,"gold",false):dimRow("Direct awareness",null,d,prev,"gold",true)}
   `;
