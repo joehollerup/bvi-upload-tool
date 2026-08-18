@@ -274,11 +274,10 @@ function calcDimStatus(dimId, d, prev) {
 function chartLabelIndices(n) {
   const TARGET = 7;
   if (n <= TARGET) return Array.from({length: n}, (_, i) => i);
+  const step = Math.max(1, Math.round(n / TARGET));
   const out = [];
-  for (let i = 0; i < TARGET; i++) {
-    out.push(Math.round(i * (n - 1) / (TARGET - 1)));
-  }
-  return [...new Set(out)];
+  for (let i = 0; i < n; i += step) out.push(i);
+  return out;
 }
 // ── SVG SPARKLINE (BVI trend) ─────────────────────────────────────────────────
 function sparklineSVG(w, h, curIdx) {
