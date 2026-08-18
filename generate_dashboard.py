@@ -108,7 +108,11 @@ def _build_data_block(cfg, T, G_data, A, S):
 
     comp_months = sorted(comp)
     months = sorted(set(comp) | set(cat) | set(gsc) | set(S) | set(A))
-    window = months[-12:]
+    # v2.3: display every scored month, not just the trailing 12 — sources
+    # have independently-sized histories (GSC caps at ~16mo, Trends/GA4 can
+    # run much longer) and score_bvi.compute() above already scores all of
+    # `months`, so this was purely a display truncation, not a scoring one.
+    window = months
 
     DLAB = {"Search": "Search Demand", "Social": "Organic Social",
             "Competitive": "Competitive Position", "Category": "Category Context"}
