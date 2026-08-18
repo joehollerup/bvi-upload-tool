@@ -267,22 +267,18 @@ function calcDimStatus(dimId, d, prev) {
   return null;
 }
 // Chart x-axis labels get unreadable past ~12 months on a fixed-width SVG.
-// Fixed to ~6-8 evenly-spaced ticks (always first + last month), computed
-// from the month count alone — NOT the selected month. The selection is
-// already shown via the highlighted marker on the line itself, so its
-// label isn't forced into the tick set; the tick set must stay identical
-// no matter which month is selected, or the axis appears to jump around
-// as you step through months. When the selection happens to land on one
-// of these fixed ticks, that tick is styled as highlighted — nothing else
-// about the tick set changes.
-function monthLabelIndices(n) {
+// Ticks are computed from the month count alone — NOT the selected month —
+// so the tick set never shifts as you step through months. The selection
+// is shown via the highlighted marker on the line itself; if it happens to
+// land on one of these fixed ticks, that tick is styled as highlighted.
+function chartLabelIndices(n) {
   const TARGET = 7;
-  if (n <= TARGET) return new Set(Array.from({length: n}, (_, i) => i));
-  const indices = new Set();
-  for (let k = 0; k < TARGET; k++) {
-    indices.add(Math.round(k * (n - 1) / (TARGET - 1)));
+  if (n <= TARGET) return Array.from({length: n}, (_, i) => i);
+  const out = [];
+  for (let i = 0; i < TARGET; i++) {
+    out.push(Math.round(i * (n - 1) / (TARGET - 1)));
   }
-  return indices;
+  return [...new Set(out)];
 }
 // ── SVG SPARKLINE (BVI trend) ─────────────────────────────────────────────────
 function sparklineSVG(w, h, curIdx) {
@@ -318,8 +314,8 @@ function trendChartSVG(curIdx) {
   const gridLines = [45,55,65].map(v=>`
     <line x1="${pad.l}" y1="${yp(v)}" x2="${W-pad.r}" y2="${yp(v)}" stroke="${B.gray}" stroke-width="0.5" opacity="0.25"/>
     <text x="${pad.l-5}" y="${yp(v)+3.5}" font-size="9" fill="${B.gray}" text-anchor="end" font-family="'Darker Grotesque',Arial,sans-serif">${v}</text>`).join("");
-  const shownLabels = monthLabelIndices(n);
-  const labels = RAW.map((m,i)=>shownLabels.has(i)?`<text x="${xp(i)}" y="${H-4}" font-size="9" fill="${i===curIdx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===curIdx?700:400}">${MONTHS[i]}</text>`:"").join("");
+  const shownLabels = chartLabelIndices(n);
+  const labels = RAW.map((m,i)=>shownLabels.includes(i)?`<text x="${xp(i)}" y="${H-4}" font-size="9" fill="${i===curIdx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===curIdx?700:400}">${MONTHS[i]}</text>`:"").join("");
   const risingRing = (cy!=null&&RAW[curIdx].risingTide) ? `<circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="${B.yellow}" stroke-width="2" opacity="0.7"/>` : "";
   const joinLine = (joinIdx>0&&RAW[joinIdx-1].bvi!=null) ? `<line x1="${xp(joinIdx-1)}" y1="${yp(RAW[joinIdx-1].bvi)}" x2="${xp(joinIdx)}" y2="${yp(RAW[joinIdx].bvi)}" stroke="${B.purple}" stroke-width="1.5" stroke-dasharray="2,2"/>` : "";
   return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
@@ -515,8 +511,8 @@ function renderCategory(d, idx) {
   const W=580,H=130,pad={l:28,r:8,t:10,b:22},minV=35,maxV=75,n=RAW.length;
   const xp=i=>pad.l+(i/(n-1))*(W-pad.l-pad.r);
   const yp=v=>pad.t+(1-(v-minV)/(maxV-minV))*(H-pad.t-pad.b);
-  const shownLabels = monthLabelIndices(n);
-  const labels=RAW.map((m,i)=>shownLabels.has(i)?`<text x="${xp(i)}" y="${H-4}" font-size="8" fill="${i===idx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===idx?700:400}">${MONTHS[i]}</text>`:"").join("");
+  const shownLabels = chartLabelIndices(n);
+  const labels=RAW.map((m,i)=>shownLabels.includes(i)?`<text x="${xp(i)}" y="${H-4}" font-size="8" fill="${i===idx?B.purple:B.gray}" text-anchor="middle" font-family="'Darker Grotesque',Arial,sans-serif" font-weight="${i===idx?700:400}">${MONTHS[i]}</text>`:"").join("");
   const catChart = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block">
     ${[40,50,60,70].map(v=>`<line x1="${pad.l}" y1="${yp(v)}" x2="${W-pad.r}" y2="${yp(v)}" stroke="${B.gray}" stroke-width="0.5" opacity="0.2"/><text x="${pad.l-4}" y="${yp(v)+3}" font-size="8" fill="${B.gray}" text-anchor="end" font-family="'Darker Grotesque',Arial,sans-serif">${v}</text>`).join("")}
     <polyline points="${CAT_TRENDS3.map((v,i)=>v!=null?`${xp(i).toFixed(1)},${yp(v).toFixed(1)}`:null).filter(Boolean).join(" ")}" fill="none" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="2,4"/>
