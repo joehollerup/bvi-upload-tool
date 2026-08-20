@@ -108,10 +108,14 @@ def _build_data_block(cfg, T, G_data, A, S):
 
     comp_months = sorted(comp)
     months = sorted(set(comp) | set(cat) | set(gsc) | set(S) | set(A))
-    # v2.3: display every scored month, not just the trailing 12 — sources
-    # have independently-sized histories (GSC caps at ~16mo, Trends/GA4 can
-    # run much longer) and score_bvi.compute() above already scores all of
-    # `months`, so this was purely a display truncation, not a scoring one.
+    # v2.4 (Clancy): score and persist every uploaded month — baselines in
+    # score_bvi.compute() above are already built from this full `months`
+    # list, and every one of those scored months must still reach
+    # bvi_score_runs via month_rows below. `window` here is a display cap
+    # ONLY: it controls which already-scored months populate the dashboard's
+    # data arrays (trend chart, month nav, RAW) — client-facing view
+    # intentionally shows just the trailing 12 months, nothing upstream of
+    # display is limited.
     window = months
 
     DLAB = {"Search": "Search Demand", "Social": "Organic Social",
@@ -327,11 +331,17 @@ def _build_data_block(cfg, T, G_data, A, S):
         }
         rows.append((m, obj, storage))
 
-    months_lbls = ",".join(f'"{label(m)}"' for m, _, _s in rows)
-    cat_p = ",".join(str(cat.get(m, {}).get(primary, "null")) for m, _, _s in rows)
-    cat_2 = ",".join(str(cat.get(m, {}).get(cat2, "null")) if cat2 else "null" for m, _, _s in rows)
-    cat_3 = ",".join(str(cat.get(m, {}).get(cat3, "null")) if cat3 else "null" for m, _, _s in rows)
-    raw_js = ",\n  ".join(obj for _, obj, _s in rows)
+    # v2.4 (Clancy): `rows` above covers every scored month (needed for
+    # month_rows / bvi_score_runs persistence, returned below). The
+    # dashboard's own data arrays — trend chart, month nav, RAW — are built
+    # from just the trailing 12 of those rows; this is the display cap and
+    # nothing upstream of it.
+    display_rows = rows[-12:]
+    months_lbls = ",".join(f'"{label(m)}"' for m, _, _s in display_rows)
+    cat_p = ",".join(str(cat.get(m, {}).get(primary, "null")) for m, _, _s in display_rows)
+    cat_2 = ",".join(str(cat.get(m, {}).get(cat2, "null")) if cat2 else "null" for m, _, _s in display_rows)
+    cat_3 = ",".join(str(cat.get(m, {}).get(cat3, "null")) if cat3 else "null" for m, _, _s in display_rows)
+    raw_js = ",\n  ".join(obj for _, obj, _s in display_rows)
     dataset_note_js = "true" if dataset_gsc_affected else "false"
 
     block = (
@@ -740,12 +750,16 @@ def generate_from_stored_rows(client_config, stored_rows):
     """
     cfg = dict(client_config)
     sorted_rows = sorted(stored_rows, key=lambda r: r["month"])
+    # v2.4 (Clancy): display cap only — stored_rows/sorted_rows covers every
+    # persisted month (bvi_score_runs is never trimmed); the dashboard's own
+    # data arrays show just the trailing 12.
+    display_rows = sorted_rows[-12:]
 
-    months_lbls = ",".join(f'"{label(r["month"])}"' for r in sorted_rows)
-    cat_p = ",".join(str(r["catTrends"]) if r.get("catTrends") is not None else "null" for r in sorted_rows)
-    cat_2 = ",".join(str(r["cat2Trends"]) if r.get("cat2Trends") is not None else "null" for r in sorted_rows)
-    cat_3 = ",".join(str(r["cat3Trends"]) if r.get("cat3Trends") is not None else "null" for r in sorted_rows)
-    raw_js = ",\n  ".join(r["obj"] for r in sorted_rows)
+    months_lbls = ",".join(f'"{label(r["month"])}"' for r in display_rows)
+    cat_p = ",".join(str(r["catTrends"]) if r.get("catTrends") is not None else "null" for r in display_rows)
+    cat_2 = ",".join(str(r["cat2Trends"]) if r.get("cat2Trends") is not None else "null" for r in display_rows)
+    cat_3 = ",".join(str(r["cat3Trends"]) if r.get("cat3Trends") is not None else "null" for r in display_rows)
+    raw_js = ",\n  ".join(r["obj"] for r in display_rows)
     dataset_gsc_affected = any(r.get("baselineGscImpressionsAffected") for r in sorted_rows)
     dataset_note_js = "true" if dataset_gsc_affected else "false"
 

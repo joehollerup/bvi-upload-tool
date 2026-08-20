@@ -869,7 +869,7 @@ function render() {
     <!-- TREND CHART -->
     <div class="card" style="margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:12px;font-weight:700">${RAW.length}-month BVI trend</div>
+        <div style="font-size:12px;font-weight:700">12-month BVI trend</div>
         <div style="display:flex;gap:14px;flex-wrap:wrap">
           ${[{color:B.purple,dash:false,label:"BVI — live"},{color:B.lightPurple,dash:true,label:"BVI — backfill"},{color:B.gray,dash:true,label:`Category`}].map(l=>`<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#ABABAB"><svg width="16" height="6"><line x1="0" y1="3" x2="16" y2="3" stroke="${l.color}" stroke-width="1.5" stroke-dasharray="${l.dash?"3,3":"none"}"/></svg>${l.label}</div>`).join("")}
           ${d.risingTide?`<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#BA7517"><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="none" stroke="#E3FF43" stroke-width="1.5"/></svg>Rising tide</div>`:""}
