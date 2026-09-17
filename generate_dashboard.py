@@ -28,6 +28,57 @@ SRC = os.path.join(_DIR, "bvi-demo-gold-unlocked (5).html")
 
 # ── Formatting helpers ─────────────────────────────────────────────────────
 
+# Factor label -> (RAW field, display suffix) for the "actual vs baseline"
+# subline under each Signal status factor. Keyed by the labels the template
+# renders. "Trends index" and "Gap to" are matched as prefixes because those
+# labels interpolate a brand or competitor name. Labels absent here get no
+# baseline line: "Branded organic split", "Primary category index" and
+# "Rising tide" are display-only and have no scored baseline to show.
+_BASELINE_FIELDS_JS = """const BASELINE_FIELDS = {
+  "Branded impressions":["impressionsBase","K"],
+  "Branded clicks":["clicksBase","K"],
+  "Google Trends index":["trendsIdxBase","/100"],
+  "Brand Trends index":["trendsIdxBase","/100"],
+  "Trends index":["trendsIdxBase","/100"],
+  "Avg position":["positionBase",""],
+  "Direct sessions":["directSessionsBase","K"],
+  "Direct % of total":["directPctBase","%"],
+  "Total organic sessions":["organicSessionsBase","K"],
+  "Engagement rate":["engagementRateBase","%"],
+  "Follower growth rate":["followerGrowthRateBase","%"],
+  "Organic reach":["reachBase","K"],
+  "Share of branded search":["brandShareBase","%"],
+  "Gap to":["gapToNearestBase"," pts"],
+  "Brand vs category gap":["categoryGapBase"," pts"]
+};
+function baselineNote(label, d) {
+  if(!d||!label) return "";
+  let e = BASELINE_FIELDS[label];
+  if(!e) for(const k in BASELINE_FIELDS){ if(label.indexOf(k)===0){ e = BASELINE_FIELDS[k]; break; } }
+  if(!e) return "";
+  const v = d[e[0]];
+  return v==null ? "" : `Baseline ${v}${e[1]}`;
+}
+
+"""
+
+
+def _signal_baselines(r):
+    """Flat {signal_key: baseline} from one month's scoring result.
+
+    Display-only, sourced from score_bvi's per-signal `baseline` field, which
+    is already scaled to the same units as that signal's displayed value.
+    """
+    out = {}
+    for dim in (r.get("dimensions") or {}).values():
+        if not isinstance(dim, dict):
+            continue
+        for key, sig in (dim.get("signals") or {}).items():
+            if isinstance(sig, dict) and sig.get("baseline") is not None:
+                out.setdefault(key, sig["baseline"])
+    return out
+
+
 def jnum(v, dec=None):
     if v is None:
         return "null"
@@ -120,6 +171,15 @@ def _build_data_block(cfg, T, G_data, A, S):
 
     DLAB = {"Search": "Search Demand", "Social": "Organic Social",
             "Competitive": "Competitive Position", "Category": "Category Context"}
+
+    # Per-signal baselines for the "actual vs baseline" display (Clancy,
+    # 2026-09-17). Baselines are computed once per run and are constant across
+    # months, so collect them from every month and carry the same values on
+    # each row — a month missing an actual still shows what it is measured
+    # against. Display-only; score_bvi never reads these back.
+    all_baselines = {}
+    for _r in results.values():
+        all_baselines.update(_signal_baselines(_r))
 
     rows = []
     for m in window:
@@ -298,7 +358,28 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'directPct:{jnum(dpct)},directPctDelta:null,'
             f'organicSessions:{jnum(os_)},organicSessionsDelta:null,'
             f'totalSessions:{jnum(total_k)},totalSessionsDelta:null,'
+            # brandedOrganic stays null: it cannot be derived per month from
+            # the current GSC input. parse_gsc computes ONE aggregate branded
+            # share from Queries.csv and applies it to every month
+            # (br_clicks = clicks * share), so br_clicks/clicks is that same
+            # constant for all months and carries no monthly signal. The
+            # Signal status row therefore still reads "—" for it, which is
+            # honest. Populating it needs a per-month branded-query pull.
             f'brandedOrganic:null,brandedOrganicDelta:null,'
+            # Per-signal baselines, same units as the actuals above.
+            f'impressionsBase:{jnum(all_baselines.get("branded_impressions"))},'
+            f'clicksBase:{jnum(all_baselines.get("branded_clicks"))},'
+            f'trendsIdxBase:{jnum(all_baselines.get("brand_trends_index"))},'
+            f'positionBase:{jnum(all_baselines.get("avg_position"))},'
+            f'directSessionsBase:{jnum(all_baselines.get("direct_sessions"))},'
+            f'directPctBase:{jnum(all_baselines.get("direct_pct"))},'
+            f'organicSessionsBase:{jnum(all_baselines.get("organic_sessions"))},'
+            f'engagementRateBase:{jnum(all_baselines.get("engagement_rate"))},'
+            f'followerGrowthRateBase:{jnum(all_baselines.get("follower_growth_rate"))},'
+            f'reachBase:{jnum(all_baselines.get("organic_reach"))},'
+            f'brandShareBase:{jnum(all_baselines.get("brand_share"))},'
+            f'gapToNearestBase:{jnum(all_baselines.get("gap_to_nearest"))},'
+            f'categoryGapBase:{jnum(all_baselines.get("category_gap"))},'
             f'followerGrowthRate:{jnum(gr,2)},followerGrowthRateDelta:{jnum(gr_d,2)},'
             f'netFollowerGrowth:{jnum(net)},reach:{jnum(reach_k)},'
             f'engagementRate:{jnum(er,2)},engagementRateDelta:{jnum(er_d,2)},'
@@ -351,6 +432,7 @@ def _build_data_block(cfg, T, G_data, A, S):
         f"const CAT_TRENDS2 = [{cat_2}];\n"
         f"const CAT_TRENDS3 = [{cat_3}];\n\n"
         f"const RAW = [\n  {raw_js}\n];\n\n"
+        + _BASELINE_FIELDS_JS +
         "const SURVEYS = [];\n\n"
         f"const DATASET_NOTE_GSC_IMPRESSIONS = {dataset_note_js};\n\n"
         "// ── STATE ────────────────────────────────────────────────────────────────────\n"
@@ -446,6 +528,15 @@ def _get_repl_list(cfg):
         ('${SCALES.map(sc=>`<div class="card" style="padding:10px 12px">',
          '${SCALES.filter(sc=>spec.signals.some(sig=>sig.s.toLowerCase()'
          '.startsWith(sc.name.split(\' \')[0].toLowerCase()))).map(sc=>`<div class="card" style="padding:10px 12px">'),
+        # Actual vs baseline (Clancy, 2026-09-17): a second subline under each
+        # Signal status factor naming the baseline the actual is measured
+        # against, so the numbers can be spot-checked. Kept separate from
+        # f.note so factors that already carry a note (rising tide, gap
+        # narrowing) keep it.
+        ('${f.note ? `<div style="font-size:10px;color:#ABABAB;margin-top:1px">${f.note}</div>` : ""}',
+         '${f.note ? `<div style="font-size:10px;color:#ABABAB;margin-top:1px">${f.note}</div>` : ""}\n'
+         '        ${baselineNote(f.label,d) ? `<div style="font-size:10px;color:#ABABAB;margin-top:1px">'
+         '${baselineNote(f.label,d)}</div>` : ""}'),
         # UX-3a: Digital no-data guard
         ('if(dimId==="digital") {\n    const status = statusFromContribution(d.digitalContribution);',
          'if(dimId==="digital") {\n'
@@ -770,6 +861,7 @@ def generate_from_stored_rows(client_config, stored_rows):
         f"const CAT_TRENDS2 = [{cat_2}];\n"
         f"const CAT_TRENDS3 = [{cat_3}];\n\n"
         f"const RAW = [\n  {raw_js}\n];\n\n"
+        + _BASELINE_FIELDS_JS +
         "const SURVEYS = [];\n\n"
         f"const DATASET_NOTE_GSC_IMPRESSIONS = {dataset_note_js};\n\n"
         "// ── STATE ────────────────────────────────────────────────────────────────────\n"
