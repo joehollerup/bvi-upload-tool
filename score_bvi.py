@@ -346,9 +346,25 @@ def contrib_position(move):
     return capped, raw != capped
 
 
-def signal(value, move, mode, contribution, capped, note=""):
+def base_disp(b, divisor=1, dec=1):
+    """A baseline in the same units and scaling as its signal's displayed value.
+
+    Display-only. Call sites pass the divisor/decimals their `value` already
+    uses (counts are shown in thousands, rates to 2dp), so actual and baseline
+    are directly comparable on the dashboard.
+    """
+    return None if b is None else round(b / divisor, dec)
+
+
+def signal(value, move, mode, contribution, capped, note="", baseline=None):
+    """`baseline` is display-only and never enters a calculation.
+
+    It carries the metric's own baseline in the same units as `value` so the
+    dashboard can show actual against baseline rather than only a % delta.
+    """
     return {
         "value": value,
+        "baseline": baseline,
         "move": round(move, 4) if move is not None else None,
         "mode": mode,
         "contribution": round(contribution, 2) if contribution is not None else None,
@@ -408,7 +424,8 @@ def score_search(m, gsc, comp, brand_key, base, cat_deseason, seas):
             mv = val - b
             c, cap = contrib_point(mv)
             small.append("branded_impressions")
-        sig["branded_impressions"] = signal(round(val / 1000, 1), mv, mode, c, cap)
+        sig["branded_impressions"] = signal(round(val / 1000, 1), mv, mode, c, cap,
+                                            note="", baseline=base_disp(b, 1000, 1))
         moves["branded_impressions"] = mv
         if cap:
             capped.append("branded_impressions")
@@ -425,7 +442,8 @@ def score_search(m, gsc, comp, brand_key, base, cat_deseason, seas):
             mv = val - b
             c, cap = contrib_point(mv)
             small.append("branded_clicks")
-        sig["branded_clicks"] = signal(round(val / 1000, 1), mv, mode, c, cap)
+        sig["branded_clicks"] = signal(round(val / 1000, 1), mv, mode, c, cap,
+                                       note="", baseline=base_disp(b, 1000, 1))
         moves["branded_clicks"] = mv
         if cap:
             capped.append("branded_clicks")
@@ -444,7 +462,8 @@ def score_search(m, gsc, comp, brand_key, base, cat_deseason, seas):
             c, cap = contrib_point(mv)
             small.append("brand_trends_index")
             note = "small-base point mode"
-        sig["brand_trends_index"] = signal(val, mv, mode, c, cap, note)
+        sig["brand_trends_index"] = signal(val, mv, mode, c, cap, note,
+                                           baseline=base_disp(b))
         moves["brand_trends_index"] = mv
         if cap:
             capped.append("brand_trends_index")
@@ -455,7 +474,8 @@ def score_search(m, gsc, comp, brand_key, base, cat_deseason, seas):
     if val is not None and b is not None:
         mv = b - val
         c, cap = contrib_position(mv)
-        sig["avg_position"] = signal(val, mv, "position", c, cap, "lower is better")
+        sig["avg_position"] = signal(val, mv, "position", c, cap, "lower is better",
+                                     baseline=base_disp(b))
         moves["avg_position"] = mv
         if cap:
             capped.append("avg_position")
@@ -482,7 +502,8 @@ def score_digital(m, ga4, base, seas):
             mv = val - b
             c, cap = contrib_point(mv)
             small.append("direct_sessions")
-        sig["direct_sessions"] = signal(round(val / 1000, 1), mv, mode, c, cap)
+        sig["direct_sessions"] = signal(round(val / 1000, 1), mv, mode, c, cap,
+                                        note="", baseline=base_disp(b, 1000, 1))
         moves["direct_sessions"] = mv
         if cap:
             capped.append("direct_sessions")
@@ -494,7 +515,8 @@ def score_digital(m, ga4, base, seas):
         mv = val - b
         c, cap = contrib_point(mv)
         sig["direct_pct"] = signal(round(val, 1), mv, "point", c, cap,
-                                   "Grand Total denominator")
+                                   "Grand Total denominator",
+                                   baseline=base_disp(b))
         moves["direct_pct"] = mv
         if cap:
             capped.append("direct_pct")
@@ -511,7 +533,8 @@ def score_digital(m, ga4, base, seas):
             mv = val - b
             c, cap = contrib_point(mv)
             small.append("organic_sessions")
-        sig["organic_sessions"] = signal(round(val / 1000, 1), mv, mode, c, cap)
+        sig["organic_sessions"] = signal(round(val / 1000, 1), mv, mode, c, cap,
+                                         note="", baseline=base_disp(b, 1000, 1))
         moves["organic_sessions"] = mv
         if cap:
             capped.append("organic_sessions")
@@ -532,7 +555,8 @@ def score_social(m, soc, base, seas):
     if val is not None and b is not None:
         mv = val - b
         c, cap = contrib_point(mv)
-        sig["engagement_rate"] = signal(round(val, 2), mv, "point", c, cap)
+        sig["engagement_rate"] = signal(round(val, 2), mv, "point", c, cap,
+                                        note="", baseline=base_disp(b, 1, 2))
         moves["engagement_rate"] = mv
         if cap:
             capped.append("engagement_rate")
@@ -543,7 +567,8 @@ def score_social(m, soc, base, seas):
     if val is not None and b is not None and b > 0 and val > 0:
         mv = log_move(val, b)
         c, cap = contrib_log(mv, seas.get("follower_growth_rate", 0.0))
-        sig["follower_growth_rate"] = signal(round(val, 2), mv, "log", c, cap)
+        sig["follower_growth_rate"] = signal(round(val, 2), mv, "log", c, cap,
+                                             note="", baseline=base_disp(b, 1, 2))
         moves["follower_growth_rate"] = mv
         if cap:
             capped.append("follower_growth_rate")
@@ -560,7 +585,8 @@ def score_social(m, soc, base, seas):
             mv = val - b
             c, cap = contrib_point(mv)
             small.append("organic_reach")
-        sig["organic_reach"] = signal(round(val / 1000, 1), mv, mode, c, cap)
+        sig["organic_reach"] = signal(round(val / 1000, 1), mv, mode, c, cap,
+                                      note="", baseline=base_disp(b, 1000, 1))
         moves["organic_reach"] = mv
         if cap:
             capped.append("organic_reach")
@@ -598,7 +624,8 @@ def score_competitive(m, comp, rivals, brand_key, base):
     if sh is not None and b is not None:
         mv = sh - b
         c, cap = contrib_point(mv)
-        sig["brand_share"] = signal(round(sh, 1), mv, "point", c, cap)
+        sig["brand_share"] = signal(round(sh, 1), mv, "point", c, cap,
+                                    note="", baseline=base_disp(b))
         moves["brand_share"] = mv
         if cap:
             capped.append("brand_share")
@@ -611,7 +638,8 @@ def score_competitive(m, comp, rivals, brand_key, base):
         mv = gap_now - b
         c, cap = contrib_point(mv)
         sig["gap_to_nearest"] = signal(gap_now, mv, "point", c, cap,
-                                       "nearest: %s" % nm)
+                                       "nearest: %s" % nm,
+                                       baseline=base_disp(b))
         moves["gap_to_nearest"] = mv
         if cap:
             capped.append("gap_to_nearest")
@@ -628,7 +656,8 @@ def score_competitive(m, comp, rivals, brand_key, base):
             mv = val - b
             c, cap = contrib_point(mv)
             small.append("brand_trends_index")
-        sig["brand_trends_index"] = signal(val, mv, mode, c, cap)
+        sig["brand_trends_index"] = signal(val, mv, mode, c, cap,
+                                           note="", baseline=base_disp(b))
         moves["brand_trends_index"] = mv
         if cap:
             capped.append("brand_trends_index")
@@ -653,7 +682,8 @@ def score_category(m, cat, cat_terms, primary, brand_key, base):
         mv = gap_now - b
         c, cap = contrib_point(mv)
         sig["category_gap"] = signal(gap_now, mv, "point", c, cap,
-                                     "primary: %s" % primary)
+                                     "primary: %s" % primary,
+                                     baseline=base_disp(b))
         moves["category_gap"] = mv
         if cap:
             capped.append("category_gap")
@@ -668,7 +698,8 @@ def score_category(m, cat, cat_terms, primary, brand_key, base):
         sh = row[brand_key] / denom * 100
         mv = sh - b
         c, cap = contrib_point(mv)
-        sig["category_share"] = signal(round(sh, 1), mv, "point", c, cap)
+        sig["category_share"] = signal(round(sh, 1), mv, "point", c, cap,
+                                       note="", baseline=base_disp(b))
         moves["category_share"] = mv
         if cap:
             capped.append("category_share")
