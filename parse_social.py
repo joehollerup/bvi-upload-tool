@@ -12,9 +12,27 @@ PLATFORMS = [
      ["Engagements", "Organic Engagements"], ["Views", "Impressions"], ["Reach", "Video Views"]),
 ]
 
+# Sprout Social's Date column varies by account and export settings: KEEN's come
+# as MM-DD-YYYY, others as M/D/YY. Month-first in every format seen so far.
+DATE_FORMATS = ("%m-%d-%Y", "%m/%d/%Y", "%m/%d/%y", "%m-%d-%y", "%Y-%m-%d")
+
 def num(s):
     s = s.strip().strip('"').replace(",", "")
     return int(s) if s and s.lstrip("-").isdigit() else 0
+
+def parse_date(s):
+    s = s.strip().strip('"')
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    # Shown to the uploader, so name the accepted shapes by example, not by code.
+    examples = ", ".join(datetime(2024, 9, 1).strftime(f) for f in DATE_FORMATS)
+    raise ValueError(
+        f"unrecognized date {s!r} in the Date column — expected a month-first "
+        f"date, e.g. {examples}"
+    )
 
 def find(header, candidates):
     for c in candidates:
@@ -33,7 +51,7 @@ def parse(path, eng_names, den_names, reach_names):
     for r in rows[1:]:
         if not r or not r[di].strip():
             continue
-        d = datetime.strptime(r[di].strip().strip('"'), "%m-%d-%Y")
+        d = parse_date(r[di])
         key = f"{d.year:04d}-{d.month:02d}"
         m = months.setdefault(key, {"date": None, "foll": 0, "net": 0, "eng": 0, "den": 0, "reach": 0})
         if m["date"] is None or d >= m["date"]:          # last day of month
