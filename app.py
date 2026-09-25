@@ -16,7 +16,7 @@ import traceback
 import json
 from datetime import datetime
 
-from flask import Flask, request, Response, redirect, url_for
+from flask import Flask, request, Response, redirect, url_for, send_from_directory
 from markupsafe import escape
 
 import parse_trends
@@ -27,6 +27,21 @@ import generate_dashboard
 import db
 
 app = Flask(__name__)
+
+_ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@app.route("/FusepointLogo.svg")
+def fusepoint_logo():
+    """Serve the header logo.
+
+    The dashboard's <img> used a relative src, so from /client/<id> the browser
+    asked for /client/FusepointLogo.svg and got a 404 — the logo never rendered
+    for anyone. There is no static route in this app, so this serves the one
+    asset the dashboard needs, and the <img> now points at the absolute path.
+    """
+    return send_from_directory(_ASSET_DIR, "FusepointLogo.svg",
+                               mimetype="image/svg+xml")
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 
 db.init_db()

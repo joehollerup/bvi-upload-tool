@@ -18,6 +18,7 @@ S must include "net" key per month (from parse_social.load_from).
 
 import json
 import os
+import re
 from datetime import datetime
 
 import score_bvi
@@ -57,7 +58,26 @@ function baselineNote(label, d) {
   if(!e) for(const k in BASELINE_FIELDS){ if(label.indexOf(k)===0){ e = BASELINE_FIELDS[k]; break; } }
   if(!e) return "";
   const v = d[e[0]];
-  return v==null ? "" : `Baseline ${v}${e[1]}`;
+  if(v==null) return "";
+  return `Baseline ${e[1]==="K" ? bigNum(v) : v+e[1]}`;
+}
+const SCORE_BANDS = [
+  [0,  35, "Well below baseline", "Awareness has fallen materially against this brand's own history. Treat the drivers below as the priority list."],
+  [35, 45, "Below baseline",      "Slipping against its own history. Look at which dimensions are negative and act on the largest."],
+  [45, 55, "Holding at baseline", "Roughly where this brand started. Holding, not compounding."],
+  [55, 70, "Building",            "Growing beyond its own baseline, net of category and season."],
+  [70, 85, "Strong growth",       "Clear brand-specific growth across dimensions."],
+  [85, 101,"Exceptional",         "Rare. Sustained brand-specific growth across every dimension."]
+];
+function scoreBand(v) {
+  if(v==null) return {name:"", meaning:""};
+  for(const [lo,hi,name,meaning] of SCORE_BANDS){ if(v>=lo&&v<hi) return {name,meaning}; }
+  return {name:"", meaning:""};
+}
+function bigNum(v) {
+  if(v==null) return "\\u2014";
+  return v >= 1000 ? (v/1000).toFixed(1).replace(/\\.0$/,"") + "M"
+                   : v.toLocaleString() + "K";
 }
 
 """
@@ -537,6 +557,20 @@ def _get_repl_list(cfg):
          '${f.note ? `<div style="font-size:10px;color:#ABABAB;margin-top:1px">${f.note}</div>` : ""}\n'
          '        ${baselineNote(f.label,d) ? `<div style="font-size:10px;color:#ABABAB;margin-top:1px">'
          '${baselineNote(f.label,d)}</div>` : ""}'),
+        # Score band (Lilly, Express walkthrough): "24 out of 100 is bad, but
+        # it's also like, well, it's bad and what do we do?" A bare number
+        # gives an account team nothing to say. The band names where the score
+        # sits against the brand's OWN baseline and what that implies, using
+        # the spec's own thresholds (1.5: 50 neutral, 45-85 the working range,
+        # below 45 sustained decline, above 85 rare). Deliberately not an
+        # industry benchmark — with three beta clients any "category average"
+        # would be invented.
+        ('<div style="font-size:11px;color:#AFAAF9;margin-bottom:10px">out of 100</div>',
+         '<div style="font-size:11px;color:#AFAAF9;margin-bottom:2px">out of 100</div>\n'
+         '          <div style="font-size:12px;font-weight:700;color:#FAF7F2;margin-bottom:1px">'
+         '${scoreBand(adjBVI).name}</div>\n'
+         '          <div style="font-size:10.5px;color:#B5B0A6;margin-bottom:10px;line-height:1.45">'
+         '${scoreBand(adjBVI).meaning}</div>'),
         # UX-3a: Digital no-data guard
         ('if(dimId==="digital") {\n    const status = statusFromContribution(d.digitalContribution);',
          'if(dimId==="digital") {\n'
@@ -691,7 +725,7 @@ def _get_repl_list(cfg):
          'Power Digital Marketing — Internal only'),
         ('gap:10px">\n        <span style="font-size:11px;font-weight:600;color:#FAF7F2;',
          'gap:14px">'
-         '<img src="FusepointLogo.svg" alt="Fusepoint" height="24" '
+         '<img src="/FusepointLogo.svg" alt="Fusepoint" height="24" '
          'style="display:block;opacity:.85;filter:brightness(0) invert(1)">'
          '<span style="font-size:11px;font-weight:600;color:#FAF7F2;'),
         ('#ABABAB', '#8A8782'),
@@ -802,6 +836,21 @@ def _apply_template(block, cfg):
     for old, new in _CHART_FIXES:
         if old in html:
             html = html.replace(old, new)
+    html = _thousands_to_millions(html)
+    return html
+
+
+def _thousands_to_millions(html):
+    """Render every "K" count through bigNum(), so millions read as 10.5M.
+
+    Every count in RAW is already in thousands, and the template appended a
+    bare "K" — so a branded-impressions month came out as "10,504K", which
+    reads as a typo in front of a client. One pass over the finished HTML
+    catches all ten sites (and any added later) instead of ten separate
+    patch targets that could silently stop matching.
+    """
+    html = re.sub(r'(d\.\w+)\.toLocaleString\(\)\+"K"', r'bigNum(\1)', html)
+    html = re.sub(r'\$\{(d\.\w+)\.toLocaleString\(\)\}K', r'${bigNum(\1)}', html)
     return html
 
 
