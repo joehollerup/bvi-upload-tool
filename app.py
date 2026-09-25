@@ -31,17 +31,23 @@ app = Flask(__name__)
 _ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-@app.route("/FusepointLogo.svg")
+@app.route("/fusepoint-logo.png")
 def fusepoint_logo():
     """Serve the header logo.
 
-    The dashboard's <img> used a relative src, so from /client/<id> the browser
-    asked for /client/FusepointLogo.svg and got a 404 — the logo never rendered
-    for anyone. There is no static route in this app, so this serves the one
-    asset the dashboard needs, and the <img> now points at the absolute path.
+    Two separate faults kept this blank. The <img> src was relative, so from
+    /client/<id> the browser asked for /client/<file> and got a 404; and every
+    .png/.svg is gitignored, so the asset was never committed and did not
+    exist on the server at all. FusepointLogo.svg was also the wrong file —
+    a 256x445 PORTRAIT wrapper around an embedded raster, which at height=24
+    would have rendered as a ~14px sliver even had it loaded.
+
+    fusepoint-logo.png is the horizontal secondary mark, white (the header is
+    charcoal, so it needs no filter), downscaled to 400x103 / 13KB and
+    committed via a .gitignore exception.
     """
-    return send_from_directory(_ASSET_DIR, "FusepointLogo.svg",
-                               mimetype="image/svg+xml")
+    return send_from_directory(_ASSET_DIR, "fusepoint-logo.png",
+                               mimetype="image/png")
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 
 db.init_db()

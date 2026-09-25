@@ -725,8 +725,8 @@ def _get_repl_list(cfg):
          'Power Digital Marketing — Internal only'),
         ('gap:10px">\n        <span style="font-size:11px;font-weight:600;color:#FAF7F2;',
          'gap:14px">'
-         '<img src="/FusepointLogo.svg" alt="Fusepoint" height="24" '
-         'style="display:block;opacity:.85;filter:brightness(0) invert(1)">'
+         '<img src="/fusepoint-logo.png" alt="Fusepoint" height="24" '
+         'style="display:block;opacity:.9">'
          '<span style="font-size:11px;font-weight:600;color:#FAF7F2;'),
         ('#ABABAB', '#8A8782'),
         ('#2B2A29', '#1F1E1D'),
