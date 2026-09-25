@@ -20,6 +20,8 @@ gsc_extract/
 *.json
 *.png
 *.svg
+# ...except the header logo, which the app serves at /fusepoint-logo.png
+!fusepoint-logo.png
 
 # Temp upload files
 /tmp/
