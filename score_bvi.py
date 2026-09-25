@@ -892,8 +892,18 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
         "cat_primary": {m: cat[m].get(primary) for m in cat} if primary else {},
     }
     for name, s in derived.items():
-        b, _, locked = baseline_mean(s, months, cycle=BASELINE_CYCLES[name])
+        b, used, locked = baseline_mean(s, months, cycle=BASELINE_CYCLES[name])
         base[name], base_locked[name] = b, locked
+        baseline_windows_used[name] = used
+
+    # Which months the baselines were actually built from. Constant per run.
+    # Surfaced because nothing on the dashboard showed it: Express's baseline
+    # reached back ~24 months through a bankruptcy the account team had
+    # explicitly asked to exclude, and the only way to notice was to compare a
+    # reported baseline against the visible months by hand.
+    _bl_months = sorted({m for w in baseline_windows_used.values() for m in w})
+    baseline_period = ({"start": _bl_months[0], "end": _bl_months[-1],
+                        "months": len(_bl_months)} if _bl_months else None)
 
     seasonal_active = bool(SEASONAL_INDEX)
 
@@ -983,6 +993,7 @@ def compute(brand_key=None, sub_vertical=None, T=None, G=None, A=None, S=None):
             "flags": sorted(set(flags)),
             "baseline_gsc_impressions_affected": baseline_gsc_impressions_affected,
             "baseline_not_locked_text": baseline_not_locked_text,
+            "baseline_period": baseline_period,
             "primary_category": primary,
             "dimensions": {d: {
                 "contribution": dim_objs[d]["contribution"],

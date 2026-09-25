@@ -83,6 +83,21 @@ function bigNum(v) {
 """
 
 
+def _baseline_period_text(r):
+    """"Baseline: 24 months, Oct '23 - Sep '25" — what the baseline was built from.
+
+    Nothing on the dashboard showed this, so a baseline reaching back through a
+    period the account team had asked to exclude was invisible unless someone
+    compared the reported baseline against the visible months by hand.
+    """
+    p = r.get("baseline_period")
+    if not p or not p.get("start"):
+        return None
+    return "Baseline: %d month%s, %s - %s" % (
+        p["months"], "" if p["months"] == 1 else "s",
+        label(p["start"]), label(p["end"]))
+
+
 def _signal_baselines(r):
     """Flat {signal_key: baseline} from one month's scoring result.
 
@@ -373,6 +388,7 @@ def _build_data_block(cfg, T, G_data, A, S):
             f'position:{jnum(position.get(m),1)},positionDelta:{jnum(pos_d,1)},'
             f'gscImpressionsUnreliable:{"true" if gsc_unreliable else "false"},'
             f'baselineNotLockedText:{js_str(baseline_not_locked_text) if baseline_not_locked_text else "null"},'
+            f'baselinePeriod:{js_str(_baseline_period_text(r)) if _baseline_period_text(r) else "null"},'
             f'trendsIdx:{jnum(kg)},trendsIdxDelta:{jnum(ti_d,0)},trendsYoY:{jnum(yoy,0)},'
             f'directSessions:{jnum(ds)},directSessionsDelta:null,'
             f'directPct:{jnum(dpct)},directPctDelta:null,'
@@ -569,8 +585,10 @@ def _get_repl_list(cfg):
          '<div style="font-size:11px;color:#AFAAF9;margin-bottom:2px">out of 100</div>\n'
          '          <div style="font-size:12px;font-weight:700;color:#FAF7F2;margin-bottom:1px">'
          '${scoreBand(adjBVI).name}</div>\n'
-         '          <div style="font-size:10.5px;color:#B5B0A6;margin-bottom:10px;line-height:1.45">'
-         '${scoreBand(adjBVI).meaning}</div>'),
+         '          <div style="font-size:10.5px;color:#B5B0A6;margin-bottom:6px;line-height:1.45">'
+         '${scoreBand(adjBVI).meaning}</div>\n'
+         '          ${d.baselinePeriod?`<div style="font-size:9.5px;color:#8A8782;'
+         'margin-bottom:10px;line-height:1.4">${d.baselinePeriod}</div>`:""}'),
         # UX-3a: Digital no-data guard
         ('if(dimId==="digital") {\n    const status = statusFromContribution(d.digitalContribution);',
          'if(dimId==="digital") {\n'
