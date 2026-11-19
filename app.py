@@ -8,6 +8,7 @@ Routes:
   GET  /client/<id>   Client dashboard
 """
 
+import hmac
 import os
 import sys
 import tempfile
@@ -29,6 +30,34 @@ import db
 app = Flask(__name__)
 
 _ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@app.before_request
+def require_login():
+    """Gate every route behind one shared login (HTTP Basic).
+
+    This app had no authentication at all: the homepage listed every client,
+    /client/<n> used sequential ids, and /new accepted uploads, so anyone with
+    the URL could read real client data. It now refuses to serve anything
+    without BVI_PASSWORD.
+
+    Fails CLOSED. An unset password returns 503 instead of letting everyone in,
+    so a missing env var cannot silently leave the app open. Set BVI_PASSWORD
+    (and optionally BVI_USER, default "bvi") in the host environment BEFORE
+    this deploys, or the whole app is unreachable until you do.
+    """
+    password = os.environ.get("BVI_PASSWORD")
+    if not password:
+        return Response("BVI_PASSWORD is not set on the server, so no client data is being served.",
+                        503, {"Content-Type": "text/plain"})
+    user = os.environ.get("BVI_USER", "bvi")
+    auth = request.authorization
+    if auth and auth.type == "basic":
+        ok_user = hmac.compare_digest((auth.username or "").encode(), user.encode())
+        ok_pass = hmac.compare_digest((auth.password or "").encode(), password.encode())
+        if ok_user and ok_pass:
+            return None
+    return Response("Login required.", 401, {"WWW-Authenticate": 'Basic realm="BVI", charset="UTF-8"'})
 
 
 @app.route("/fusepoint-logo.png")
